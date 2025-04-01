@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediBot - AI Medical Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="doctor-profile">
+                <img src="{{ url_for('static', filename='images/Doctor.png') }}" alt="Doctor Avatar" class="doctor-avatar">
+                <div class="header-text">
+                    <h1>MediBot Assistant</h1>
+                    <p>Ask any medical question and I will be more than happy to help</p>
+                </div>
+            </div>
+        </div>
+        
+        <div id="chat-history" class="chat-history">
+            <!-- Bot welcome message -->
+            <div class="bot-message">
+                <div class="message">
+                    Hello! I'm MediBot. How can I assist you with your health concerns today?
+                </div>
+            </div>
+        </div>
+
+        <div class="input-container">
+            <div class="input-group">
+                <input type="text" id="user-input" placeholder="Type your medical question here..." autocomplete="off">
+                <button id="send-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('send-btn').addEventListener('click', sendMessage);
+        document.getElementById('user-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function sendMessage() {
+            const input = document.getElementById('user-input');
+            const query = input.value.trim();
+            if (!query) return;
+
+            // Add user message to the chat history
+            const chatHistory = document.getElementById('chat-history');
+            chatHistory.innerHTML += `
+                <div class="user-message">
+                    <div class="message">${query}</div>
+                </div>
+            `;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            // Clear the input field
+            input.value = '';
+
+            // Add a temporary "processing" message
+            chatHistory.innerHTML += `
+                <div class="bot-message">
+                    <div class="message">I'm processing your query. Please wait...</div>
+                </div>
+            `;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            // Make an API call to the Flask backend
+            fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json(); // Parse the JSON response
+            })
+            .then(data => {
+                console.log('API Response:', data); // Log the response for debugging
+
+                // Remove the "processing" message
+                const messages = chatHistory.getElementsByClassName('bot-message');
+                messages[messages.length - 1].remove();
+
+                // Add the bot's response
+                chatHistory.innerHTML += `
+                    <div class="bot-message">
+                        <div class="message">${data.response}</div>
+                    </div>
+                `;
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            })
+            .catch(error => {
+                console.error('Error during API call:', error);
+
+                // Remove the "processing" message
+                const messages = chatHistory.getElementsByClassName('bot-message');
+                messages[messages.length - 1].remove();
+
+                // Display an error message
+                chatHistory.innerHTML += `
+                    <div class="bot-message">
+                        <div class="message">Sorry, I encountered an error while processing your request.</div>
+                    </div>
+                `;
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            });
+        }
+    </script>
+</body>
+</html>
