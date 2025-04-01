@@ -2,7 +2,7 @@ import os
 import time
 from dotenv import load_dotenv
 from src.helper import load_pdf_file, text_split, download_hugging_face_embeddings
-from langchain_community.vectorstores import Pinecone as LangchainPinecone
+from langchain_pinecone import Pinecone as LangchainPinecone
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pinecone import Pinecone, ServerlessSpec
 

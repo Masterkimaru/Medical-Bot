@@ -6,7 +6,7 @@ import sys
 from pinecone import Pinecone, data
 from src.helper import download_hugging_face_embeddings
 from src.prompt import system_prompt
-from langchain_community.vectorstores import Pinecone as LangchainPinecone
+from langchain_pinecone import Pinecone as LangchainPinecone
 import re
 import requests
 from langchain.llms.base import LLM
