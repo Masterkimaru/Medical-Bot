@@ -5,6 +5,7 @@ from src.helper import load_pdf_file, text_split, download_hugging_face_embeddin
 from langchain_pinecone import Pinecone as LangchainPinecone
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pinecone import Pinecone, ServerlessSpec
+from pathlib import Path
 
 # Monkey-patch pinecone.Index to use the new client’s index type
 from pinecone import data
@@ -23,9 +24,12 @@ def main():
         print(f"Failed to initialize Pinecone: {e}")
         raise
 
+    # Dynamically calculate the relative path to the 'Data/' folder
+    data_folder = Path(__file__).parent / "Data"
+
     # Load and process data
     print("\n1. Loading PDF documents...")
-    extracted_data = load_pdf_file(data='C:/Users/Kelvin/OneDrive/Desktop/Medical Chatbot/Data/')
+    extracted_data = load_pdf_file(data=str(data_folder))
     
     print("\n2. Splitting text into chunks...")
     text_chunks = text_split(extracted_data)
