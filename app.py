@@ -134,4 +134,6 @@ def clean_response(response):
     return response.strip()
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    # On Render, PORT is guaranteed to be set.
+    port = int(os.environ['PORT'])
+    app.run(debug=False, host='0.0.0.0', port=port)
