@@ -1,120 +1,345 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MediBot - AI Medical Assistant</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediBot - AI Medical Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="chat-container">
-        <div class="chat-header">
-            <div class="doctor-profile">
-                <img src="{{ url_for('static', filename='images/Doctor.png') }}" alt="Doctor Avatar" class="doctor-avatar">
-                <div class="header-text">
-                    <h1>MediBot Assistant</h1>
-                    <p>Ask any medical question and I will be more than happy to help</p>
-                </div>
-            </div>
+  <div class="chat-container">
+    <div class="chat-header">
+      <div class="doctor-profile">
+        <img src="{{ url_for('static', filename='images/Doctor.png') }}" alt="Doctor Avatar" class="doctor-avatar">
+        <div class="header-text">
+          <h1>MediBot Assistant</h1>
+          <p>Describe your symptoms or upload medical images for analysis</p>
         </div>
-        
-        <div id="chat-history" class="chat-history">
-            <!-- Bot welcome message -->
-            <div class="bot-message">
-                <div class="message">
-                    Hello! I'm MediBot. How can I assist you with your health concerns today?
-                </div>
-            </div>
+      </div>
+    </div>
+    
+    <div id="chat-history" class="chat-history">
+      <div class="bot-message">
+        <div class="message">
+          Hello! I'm MediBot, your AI medical assistant. I can help assess symptoms, analyze images, and provide general health information. Please describe your concern.
         </div>
-
-        <div class="input-container">
-            <div class="input-group">
-                <input type="text" id="user-input" placeholder="Type your medical question here..." autocomplete="off">
-                <button id="send-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-                        <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
+        <button class="icon-btn speech-response-btn" data-speaking="false" title="Speak Response" 
+                onclick="toggleResponseSpeech(this, `Hello! I'm MediBot, your AI medical assistant...`)">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <script>
-        document.getElementById('send-btn').addEventListener('click', sendMessage);
-        document.getElementById('user-input').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') sendMessage();
+    <div class="input-container">
+      <div class="input-group">
+        <input type="text" id="user-input" placeholder="Describe your symptoms (e.g., headache for 3 days)..." autocomplete="off">
+        <button id="voice-btn" class="icon-btn" title="Voice Input">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        </button>
+        <input type="file" id="image-upload" accept="image/*" hidden>
+        <button id="image-btn" class="icon-btn" title="Upload Medical Image">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+        </button>
+        <button id="send-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="tools-menu">
+        <button class="tool-btn" onclick="showBmiCalculator()">BMI Calculator</button>
+        <button class="tool-btn" onclick="showMedicationTracker()">Symptom Tracker</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BMI Calculator Modal -->
+  <div id="bmi-modal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" onclick="closeModal()">&times;</span>
+      <h2>BMI Calculator</h2>
+      <div class="form-group">
+        <label for="weight">Weight (kg):</label>
+        <input type="number" id="weight" placeholder="Enter weight in kg">
+      </div>
+      <div class="form-group">
+        <label for="height">Height (cm):</label>
+        <input type="number" id="height" placeholder="Enter height in cm">
+      </div>
+      <button class="calculate-btn" onclick="calculateBmi()">Calculate BMI</button>
+      <div id="bmi-result" class="result-container"></div>
+    </div>
+  </div>
+
+  <script>
+    // ================== Medical Chat Enhancements ==================
+    function sendMessage() {
+      const input = document.getElementById('user-input');
+      const query = input.value.trim();
+      if (!query) return;
+
+      // Collect conversation history with speaker tags
+      const chatHistory = Array.from(document.querySelectorAll('.user-message, .bot-message'))
+        .slice(-4) // Keep last 2 exchanges
+        .map(msg => {
+          const isUser = msg.classList.contains('user-message');
+          return `${isUser ? 'Patient' : 'Doctor'}: ${msg.querySelector('.message').textContent}`;
         });
 
-        function sendMessage() {
-            const input = document.getElementById('user-input');
-            const query = input.value.trim();
-            if (!query) return;
+      addUserMessage(query);
+      input.value = '';
 
-            // Add user message to the chat history
-            const chatHistory = document.getElementById('chat-history');
-            chatHistory.innerHTML += `
-                <div class="user-message">
-                    <div class="message">${query}</div>
-                </div>
-            `;
-            chatHistory.scrollTop = chatHistory.scrollHeight;
+      const loadingMsg = addBotMessage("Analyzing your symptoms...");
 
-            // Clear the input field
-            input.value = '';
+      fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+          query: query,
+          history: chatHistory
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        loadingMsg.remove();
+        // Format the structured medical response
+        const formattedResponse = formatMedicalResponse(data.response);
+        addBotMessage(formattedResponse);
+      })
+      .catch(error => {
+        loadingMsg.remove();
+        addBotMessage("Error processing your request. Please try again.");
+        console.error('API error:', error);
+      });
+    }
 
-            // Add a temporary "processing" message
-            chatHistory.innerHTML += `
-                <div class="bot-message">
-                    <div class="message">I'm processing your query. Please wait...</div>
-                </div>
-            `;
-            chatHistory.scrollTop = chatHistory.scrollHeight;
+    function formatMedicalResponse(text) {
+    return text
+        .replace(/\[Follow-up Questions\]/g, '<div class="section-title">Follow-up Questions</div>')
+        .replace(/\[Possible Explanations\]/g, '<div class="section-title">Possible Conditions</div>')
+        .replace(/\[Recommended Actions\]/g, '<div class="section-title">Recommended Actions</div>')
+        .replace(/\[When to Seek Help\]/g, '<div class="warning-box section-title">⚠️ When to Seek Immediate Help</div>')
+        .replace(/\n/g, '<br>')
+        .replace(/- (.*?)(<br>|$)/g, '<div class="bullet-point">$1</div>')
+        .replace(/\!\!(.*?)\!\!/g, '<span class="medical-term" title="Medical term">$1</span>');
+    }
 
-            // Make an API call to the Flask backend
-            fetch('/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ query: query })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json(); // Parse the JSON response
-            })
-            .then(data => {
-                console.log('API Response:', data); // Log the response for debugging
+    // ================== Image Upload ==================
+    document.getElementById('image-btn').addEventListener('click', () => {
+      document.getElementById('image-upload').click();
+    });
 
-                // Remove the "processing" message
-                const messages = chatHistory.getElementsByClassName('bot-message');
-                messages[messages.length - 1].remove();
-
-                // Add the bot's response
-                chatHistory.innerHTML += `
-                    <div class="bot-message">
-                        <div class="message">${data.response}</div>
-                    </div>
-                `;
-                chatHistory.scrollTop = chatHistory.scrollHeight;
-            })
-            .catch(error => {
-                console.error('Error during API call:', error);
-
-                // Remove the "processing" message
-                const messages = chatHistory.getElementsByClassName('bot-message');
-                messages[messages.length - 1].remove();
-
-                // Display an error message
-                chatHistory.innerHTML += `
-                    <div class="bot-message">
-                        <div class="message">Sorry, I encountered an error while processing your request.</div>
-                    </div>
-                `;
-                chatHistory.scrollTop = chatHistory.scrollHeight;
-            });
+    document.getElementById('image-upload').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      if (file.size > 5 * 1024 * 1024) {
+        addBotMessage("Please upload an image smaller than 5MB.");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Image = reader.result.split(',')[1];
+        addUserMessage("Uploaded medical image for analysis");
+        
+        const loadingMsg = addBotMessage("Analyzing medical image...");
+        
+        try {
+          const response = await fetch('/analyze-image', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ image: base64Image })
+          });
+          const data = await response.json();
+          loadingMsg.remove();
+          addBotMessage(data.response);
+        } catch (error) {
+          loadingMsg.remove();
+          addBotMessage("Image analysis failed. Please try again.");
         }
-    </script>
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // ================== BMI Calculator ==================
+    function calculateBmi() {
+      const weight = parseFloat(document.getElementById('weight').value);
+      const height = parseFloat(document.getElementById('height').value);
+      
+      if (!weight || !height) {
+        alert("Please enter both weight and height");
+        return;
+      }
+      
+      fetch('/calculate-bmi', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ weight, height })
+      })
+      .then(response => response.json())
+      .then(data => {
+        const resultDiv = document.getElementById('bmi-result');
+        resultDiv.innerHTML = `
+          <h3>Your BMI: ${data.bmi}</h3>
+          <p>Category: ${data.category}</p>
+          <p>${data.interpretation}</p>
+          <div class="bmi-scale">
+            <div class="scale-item ${data.bmi < 18.5 ? 'active' : ''}">Underweight (<18.5)</div>
+            <div class="scale-item ${(18.5 <= data.bmi && data.bmi < 25) ? 'active' : ''}">Normal (18.5-24.9)</div>
+            <div class="scale-item ${(25 <= data.bmi && data.bmi < 30) ? 'active' : ''}">Overweight (25-29.9)</div>
+            <div class="scale-item ${data.bmi >= 30 ? 'active' : ''}">Obese (30+)</div>
+          </div>
+        `;
+        
+        addUserMessage(`BMI calculation: Weight ${weight}kg, Height ${height}cm`);
+        addBotMessage(`Your BMI is ${data.bmi} (${data.category}). ${data.interpretation}`);
+      })
+      .catch(error => {
+        alert("Error calculating BMI. Please try again.");
+      });
+    }
+
+    // ================== Core Chat Functions ==================
+    function addUserMessage(text) {
+      const chatHistory = document.getElementById('chat-history');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'user-message';
+      messageDiv.innerHTML = `<div class="message">${text}</div>`;
+      chatHistory.appendChild(messageDiv);
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    function addBotMessage(text) {
+      const chatHistory = document.getElementById('chat-history');
+      const messageWrapper = document.createElement('div');
+      messageWrapper.className = 'bot-message';
+      
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message';
+      messageDiv.innerHTML = text;
+      messageWrapper.appendChild(messageDiv);
+
+      const speechBtn = document.createElement('button');
+      speechBtn.className = 'icon-btn speech-response-btn';
+      speechBtn.setAttribute('data-speaking', 'false');
+      speechBtn.title = 'Speak Response';
+      speechBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      `;
+      speechBtn.addEventListener('click', function() {
+        toggleResponseSpeech(speechBtn, messageDiv.textContent);
+      });
+      messageWrapper.appendChild(speechBtn);
+
+      chatHistory.appendChild(messageWrapper);
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+      return messageWrapper;
+    }
+
+    // ================== Voice Functions ==================
+    let isRecording = false;
+    const voiceBtn = document.getElementById('voice-btn');
+    let recognition;
+
+    if ('webkitSpeechRecognition' in window) {
+      recognition = new webkitSpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      voiceBtn.addEventListener('click', () => {
+        if (!isRecording) {
+          recognition.start();
+          voiceBtn.classList.add('recording');
+        } else {
+          recognition.stop();
+          voiceBtn.classList.remove('recording');
+        }
+        isRecording = !isRecording;
+      });
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        document.getElementById('user-input').value = transcript;
+        voiceBtn.classList.remove('recording');
+        isRecording = false;
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error', event.error);
+        voiceBtn.classList.remove('recording');
+        isRecording = false;
+      };
+    } else {
+      voiceBtn.style.display = 'none';
+    }
+
+    // ================== Text-to-Speech ==================
+    function toggleResponseSpeech(button, text) {
+      if (button.getAttribute('data-speaking') === 'true') {
+        window.speechSynthesis.cancel();
+        button.setAttribute('data-speaking', 'false');
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9;
+      utterance.onend = () => {
+        button.setAttribute('data-speaking', 'false');
+      };
+      window.speechSynthesis.speak(utterance);
+      button.setAttribute('data-speaking', 'true');
+    }
+
+    // ================== Modal Controls ==================
+    function showBmiCalculator() {
+      document.getElementById('bmi-modal').style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+      document.getElementById('bmi-modal').style.display = 'none';
+      document.body.style.overflow = 'auto';
+    }
+
+    function showMedicationTracker() {
+      alert("Symptom tracker coming in the next update!");
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      const modal = document.getElementById('bmi-modal');
+      if (event.target == modal) {
+        closeModal();
+      }
+    }
+
+    // Send message on Enter key
+    document.getElementById('user-input').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') sendMessage();
+    });
+  </script>
 </body>
 </html>

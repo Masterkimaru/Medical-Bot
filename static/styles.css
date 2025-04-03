@@ -79,6 +79,7 @@ body {
     position: relative;
     animation: fadeIn 0.4s ease;
     word-wrap: break-word;
+    font-size: 16px;
 }
 
 .user-message {
@@ -106,62 +107,292 @@ body {
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
-/* Input Area */
+/* Enhanced Input Container */
 .input-container {
     padding: 20px;
-    background: rgba(30, 30, 30, 0.9);
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(40, 40, 40, 0.95);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
+/* Enhanced Input Group */
 .input-group {
     display: flex;
-    gap: 15px;
-    position: relative;
+    align-items: center;
+    gap: 8px;
 }
 
 #user-input {
     flex: 1;
-    padding: 15px 25px;
-    border: none;
+    padding: 12px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 30px;
     font-size: 16px;
-    background: rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.1);
     color: #ffffff;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, border 0.3s ease;
 }
 
 #user-input::placeholder {
-    color: #888;
+    color: #bbbbbb;
 }
 
 #user-input:focus {
     outline: none;
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 0 20px rgba(0, 123, 255, 0.25);
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid #007bff;
 }
 
+/* Icon Buttons */
+.icon-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: background 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.icon-btn svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* Send Button */
 #send-btn {
     background: linear-gradient(135deg, #007bff, #0066cc);
     border: none;
     border-radius: 50%;
-    width: 50px;
-    height: 50px;
+    width: 48px;
+    height: 48px;
     display: flex;
     justify-content: center;
     align-items: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 #send-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 0 25px rgba(0, 123, 255, 0.4);
+    transform: scale(1.1);
+    box-shadow: 0 0 15px rgba(0, 123, 255, 0.6);
 }
 
 #send-btn svg {
-    width: 24px;
-    height: 24px;
-    fill: white;
+    fill: #ffffff;
+}
+
+/* Tools Menu */
+.tools-menu {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.tool-btn {
+    background: rgba(0, 123, 255, 0.2);
+    border: none;
+    padding: 8px 16px;
+    border-radius: 20px;
+    color: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+}
+
+.tool-btn:hover {
+    background: rgba(0, 123, 255, 0.4);
+    transform: scale(1.05);
+}
+
+/* BMI Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    animation: fadeIn 0.3s ease;
+}
+
+.modal-content {
+    background: rgba(30, 30, 30, 0.95);
+    margin: 10% auto;
+    padding: 25px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 5px 30px rgba(0, 123, 255, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+}
+
+.close-btn {
+    position: absolute;
+    right: 20px;
+    top: 15px;
+    font-size: 28px;
+    color: #aaa;
+    cursor: pointer;
+    transition: color 0.3s ease;
+}
+
+.close-btn:hover {
+    color: #007bff;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #e0e0e0;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.calculate-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #007bff, #0066cc);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: transform 0.2s ease;
+}
+
+.calculate-btn:hover {
+    transform: translateY(-2px);
+}
+
+.result-container {
+    margin-top: 20px;
+    padding: 15px;
+    border-radius: 8px;
+    background: rgba(0, 123, 255, 0.1);
+    border: 1px solid rgba(0, 123, 255, 0.2);
+}
+
+.bmi-scale {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 15px;
+}
+
+.scale-item {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px;
+    text-align: center;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 12px;
+}
+
+.scale-item.active {
+    background: rgba(0, 123, 255, 0.3);
+    font-weight: 500;
+}
+
+/* ===== Medical Response Styles ===== */
+.section-title {
+    font-weight: 600;
+    color: #007bff;
+    margin: 20px 0 10px 0;
+    font-size: 1.1em;
+    border-bottom: 1px solid rgba(0, 123, 255, 0.3);
+    padding-bottom: 5px;
+}
+
+.bullet-point {
+    margin-left: 20px;
+    padding: 5px 0;
+    position: relative;
+    line-height: 1.6;
+}
+
+.bullet-point::before {
+    content: "•";
+    color: #007bff;
+    font-weight: bold;
+    display: inline-block;
+    width: 1em;
+    margin-left: -1em;
+}
+
+/* Medical Highlight Boxes */
+.warning-box {
+    background: rgba(255, 87, 34, 0.15);
+    border-left: 4px solid #ff5722;
+    padding: 12px;
+    margin: 15px 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.recommendation-box {
+    background: rgba(76, 175, 80, 0.15);
+    border-left: 4px solid #4caf50;
+    padding: 12px;
+    margin: 15px 0;
+    border-radius: 0 8px 8px 0;
+}
+
+/* Medical Term Highlighting */
+.medical-term {
+    color: #00bcd4;
+    font-weight: 500;
+    border-bottom: 1px dashed #00bcd4;
+    cursor: help;
+}
+
+/* Response Status Indicators */
+.response-status {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 500;
+    margin-right: 8px;
+}
+
+.status-followup {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
+}
+
+.status-warning {
+    background: rgba(255, 87, 34, 0.2);
+    color: #ff5722;
+}
+
+.status-recommendation {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
 }
 
 /* Animations */
@@ -192,4 +423,110 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #0066cc;
+}
+
+/* Responsive Design */
+
+/* Small devices (max-width: 600px) */
+@media (max-width: 600px) {
+    .chat-container {
+        max-width: 100%;
+        margin: 10px;
+        border-radius: 10px;
+    }
+    
+    .chat-header,
+    .input-container,
+    .chat-history {
+        padding: 15px;
+    }
+    
+    .doctor-avatar {
+        width: 60px;
+        height: 60px;
+    }
+    
+    .header-text h1 {
+        font-size: 1.3em;
+    }
+    
+    .header-text p {
+        font-size: 0.85em;
+    }
+    
+    .message {
+        font-size: 14px;
+        padding: 12px 16px;
+    }
+    
+    #user-input {
+        font-size: 14px;
+        padding: 10px 15px;
+    }
+    
+    .input-group {
+        gap: 6px;
+    }
+    
+    .icon-btn {
+        padding: 6px;
+    }
+    
+    #send-btn {
+        width: 42px;
+        height: 42px;
+    }
+    
+    .tool-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    
+    .modal-content {
+        margin: 20% auto;
+        padding: 20px;
+    }
+    
+    .scale-item {
+        min-width: 100px;
+        font-size: 11px;
+    }
+}
+
+/* Medium devices (min-width: 601px and max-width: 1024px) */
+@media (min-width: 601px) and (max-width: 1024px) {
+    .chat-container {
+        max-width: 90%;
+    }
+    
+    .chat-header,
+    .input-container {
+        padding: 20px;
+    }
+    
+    .message {
+        font-size: 15px;
+    }
+    
+    #user-input {
+        font-size: 15px;
+    }
+    
+    .input-group {
+        gap: 8px;
+    }
+    
+    .icon-btn {
+        padding: 7px;
+    }
+    
+    #send-btn {
+        width: 46px;
+        height: 46px;
+    }
+    
+    .tool-btn {
+        padding: 7px 14px;
+        font-size: 13px;
+    }
 }

@@ -3,15 +3,21 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 import sys
-from pinecone import Pinecone, data
-from src.helper import download_hugging_face_embeddings
-from src.prompt import system_prompt
-from langchain_pinecone import Pinecone as LangchainPinecone
 import re
 import requests
+import base64
+from io import BytesIO
+from PIL import Image
+from datetime import datetime
+
+# Import prompt definitions from src/prompt.py
+from src.prompt import system_prompt, image_analysis_prompt
+
+from pinecone import Pinecone, data
+from src.helper import download_hugging_face_embeddings
+from langchain_pinecone import Pinecone as LangchainPinecone
 from langchain.llms.base import LLM
 from pydantic import Field
-from transformers import pipeline
 
 app = Flask(__name__)
 
@@ -23,7 +29,7 @@ load_dotenv()
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# Monkey-patch pinecone.Index to use the new client’s index type
+# Monkey-patch pinecone.Index to use the new client's index type
 import pinecone
 pinecone.Index = data.index.Index
 
@@ -55,14 +61,13 @@ class DeepseekLLM(LLM):
         return "deepseek"
     
     def _call(self, prompt: str, stop=None) -> str:
-        # Use OpenRouter's endpoint for chat completions
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "deepseek/deepseek-chat:free",  # Ensure this matches your account tier on OpenRouter
+            "model": "deepseek/deepseek-chat:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -79,59 +84,154 @@ class DeepseekLLM(LLM):
 # Initialize the Deepseek LLM
 llm = DeepseekLLM(api_key=OPENROUTER_API_KEY, temperature=0.4, max_tokens=2000)
 
+class QwenImageAnalyzer:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+    def analyze_image(self, base64_image, prompt):
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        
+        payload = {
+            "model": "qwen/qwen2.5-vl-72b-instruct:free",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ]
+            }],
+            "temperature": 0.4,
+            "max_tokens": 1000
+        }
+
+        response = requests.post(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']
+
+# Initialize Qwen analyzer
+image_analyzer = QwenImageAnalyzer(OPENROUTER_API_KEY)
+
+# Mock wearable data integration
+def get_wearable_data():
+    """Simulate fetching wearable device data"""
+    return {
+        "heart_rate": 72,
+        "blood_pressure": "120/80",
+        "temperature": 98.6,
+        "last_sync": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "oxygen_saturation": 98
+    }
+
 @app.route('/')
 def index():
     return render_template('chat.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    user_query = request.json['query']
-
-    # Retrieve relevant documents from Pinecone
     try:
-        docs = vector_store.similarity_search(user_query, k=5)  # Retrieve top 5 relevant documents
-        print(f"Retrieved {len(docs)} documents from Pinecone.")
-        if not docs:
-            return jsonify({'response': 'I do not know.'})
-        context = "\n".join([doc.page_content for doc in docs])
-        print(f"Context: {context}")
+        data = request.json
+        user_query = data['query']
+        chat_history = data.get('history', [])
 
-        # Skip summarization to retain detailed context
-        # context = summarize_context(context)
-    except Exception as e:
-        print(f"Error during similarity search: {e}")
-        return jsonify({'response': f"Error retrieving data: {str(e)}"}), 500
+        # Retrieve relevant medical context
+        docs = vector_store.similarity_search(user_query, k=3)
+        context = "\n".join([doc.page_content for doc in docs]) if docs else "No specific medical context available"
 
-    # Generate response using Deepseek LLM
-    try:
-        formatted_prompt = system_prompt.format(context=context)
-        print(f"Formatted Prompt: {formatted_prompt}")
+        # Generate response with medical workflow using the imported system_prompt
+        formatted_prompt = system_prompt.format(
+            context=context,
+            query=user_query,
+            history="\n".join(chat_history[-3:]),  # Last 3 exchanges
+            wearable_data=get_wearable_data()
+        )
 
-        # Call the Deepseek LLM to generate a response
         raw_response = llm._call(formatted_prompt)
-        print(f"Raw Response: {raw_response}")
-
-        # Clean the response
         response = clean_response(raw_response)
-        print(f"Cleaned Response: {response}")
-    except Exception as e:
-        print(f"Error during model generation: {e}")
-        response = "I encountered an error while processing your request."
 
-    # Return the response as JSON
-    return jsonify({'response': response})
+        return jsonify({
+            'response': response,
+            'context_used': [doc.page_content[:100] + "..." for doc in docs]  # For debugging
+        })
+
+    except Exception as e:
+        return jsonify({
+            'response': "⚠️ Medical analysis error. Please try again or consult a doctor directly.",
+            'error': str(e)
+        }), 500
+
+@app.route('/analyze-image', methods=['POST'])
+def handle_image_analysis():
+    try:
+        data = request.json
+        base64_image = data['image']
+        
+        # Use the imported image_analysis_prompt instead of redefining it
+        analysis = image_analyzer.analyze_image(base64_image, image_analysis_prompt)
+        return jsonify({
+            'response': f"IMAGE ANALYSIS:\n{analysis}\n\nNOTE: Always verify with a healthcare professional",
+            'type': 'image_analysis'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'error': f"Image analysis failed: {str(e)}",
+            'type': 'error'
+        }), 500
+
+@app.route('/calculate-bmi', methods=['POST'])
+def calculate_bmi():
+    try:
+        data = request.json
+        weight = float(data['weight'])
+        height = float(data['height'])
+        
+        bmi = weight / ((height/100) ** 2)
+        
+        if bmi < 18.5:
+            category = "Underweight"
+        elif 18.5 <= bmi < 25:
+            category = "Normal weight"
+        elif 25 <= bmi < 30:
+            category = "Overweight"
+        else:
+            category = "Obese"
+            
+        return jsonify({
+            'bmi': round(bmi, 1),
+            'category': category,
+            'interpretation': get_bmi_interpretation(category),
+            'type': 'bmi_result'
+        })
+    except Exception as e:
+        return jsonify({
+            'error': f"BMI calculation error: {str(e)}",
+            'type': 'error'
+        }), 400
+
+def get_bmi_interpretation(category):
+    # You can use the imported bmi_interpretation as reference or logging if needed.
+    interpretations = {
+        "Underweight": "May indicate nutritional deficiency or other conditions",
+        "Normal weight": "Healthy weight range for your height",
+        "Overweight": "Increased risk for health conditions",
+        "Obese": "High risk for serious health conditions"
+    }
+    return interpretations.get(category, "Consult a healthcare provider for personalized advice")
 
 def clean_response(response):
-    """Clean up the generated response."""
-    # Remove irrelevant phrases
-    response = re.sub(r"(encyclopedia|names are not related|experimental approach)", "", response, flags=re.IGNORECASE)
-
-    # Ensure the response ends with punctuation (e.g., period, exclamation mark)
-    if not response.endswith(('.', '?', '!')):
-        # Only trim incomplete sentences if they are very short (less than 5 characters)
-        response = re.sub(r"[^\.!?]{1,5}$", "", response)
-
-    return response.strip()
+    # Remove unnecessary disclaimers while keeping safety notices
+    response = re.sub(r"(as an ai(?: language)? model|i(?:'m| am) an? ai)", "", response, flags=re.IGNORECASE)
+    response = re.sub(r"\s+", " ", response).strip()
+    
+    # Ensure safety notice is present
+    if "consult a healthcare professional" not in response.lower():
+        response += "\n\nNote: Consult a healthcare professional for medical advice"
+    
+    return response
 
 if __name__ == '__main__':
     # On Render, PORT is guaranteed to be set.
