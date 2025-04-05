@@ -10,8 +10,13 @@ from io import BytesIO
 from PIL import Image
 from datetime import datetime
 
-# Import prompt definitions from src/prompt.py
-from src.prompt import system_prompt, image_analysis_prompt
+# Import all prompt definitions from src/prompt.py
+from src.prompt import (
+    system_prompt, 
+    emergency_subprompt,
+    image_analysis_prompt,
+    bmi_interpretation
+)
 
 from pinecone import Pinecone, data
 from src.helper import download_hugging_face_embeddings
@@ -115,6 +120,19 @@ class QwenImageAnalyzer:
 # Initialize Qwen analyzer
 image_analyzer = QwenImageAnalyzer(OPENROUTER_API_KEY)
 
+# Emergency keywords detection
+EMERGENCY_KEYWORDS = {
+    'faint', 'seizure', 'choking', 'bleeding', 
+    'unconscious', 'heart attack', 'overdose'
+}
+
+def detect_query_category(query):
+    """Determine if query is emergency or normal"""
+    query_lower = query.lower()
+    if any(keyword in query_lower for keyword in EMERGENCY_KEYWORDS):
+        return "emergency"
+    return "non-emergency"
+
 # Mock wearable data integration
 def get_wearable_data():
     """Simulate fetching wearable device data"""
@@ -136,24 +154,31 @@ def chat():
         data = request.json
         user_query = data['query']
         chat_history = data.get('history', [])
+        
+        # Detect query category
+        category = detect_query_category(user_query)
 
         # Retrieve relevant medical context
         docs = vector_store.similarity_search(user_query, k=3)
         context = "\n".join([doc.page_content for doc in docs]) if docs else "No specific medical context available"
 
-        # Generate response with medical workflow using the imported system_prompt
+        # Format the prompt with the new structure
         formatted_prompt = system_prompt.format(
-            context=context,
             query=user_query,
             history="\n".join(chat_history[-3:]),  # Last 3 exchanges
-            wearable_data=get_wearable_data()
+            category=category
         )
+
+        # For emergencies, append the emergency subprompt
+        if category == "emergency":
+            formatted_prompt += "\n\n" + emergency_subprompt
 
         raw_response = llm._call(formatted_prompt)
         response = clean_response(raw_response)
 
         return jsonify({
             'response': response,
+            'category': category,
             'context_used': [doc.page_content[:100] + "..." for doc in docs]  # For debugging
         })
 
@@ -169,7 +194,6 @@ def handle_image_analysis():
         data = request.json
         base64_image = data['image']
         
-        # Use the imported image_analysis_prompt instead of redefining it
         analysis = image_analyzer.analyze_image(base64_image, image_analysis_prompt)
         return jsonify({
             'response': f"IMAGE ANALYSIS:\n{analysis}\n\nNOTE: Always verify with a healthcare professional",
@@ -200,10 +224,16 @@ def calculate_bmi():
         else:
             category = "Obese"
             
+        # Format BMI interpretation using the prompt template
+        interpretation = bmi_interpretation.format(
+            bmi_value=round(bmi, 1),
+            category=category
+        )
+            
         return jsonify({
             'bmi': round(bmi, 1),
             'category': category,
-            'interpretation': get_bmi_interpretation(category),
+            'interpretation': interpretation,
             'type': 'bmi_result'
         })
     except Exception as e:
@@ -211,16 +241,6 @@ def calculate_bmi():
             'error': f"BMI calculation error: {str(e)}",
             'type': 'error'
         }), 400
-
-def get_bmi_interpretation(category):
-    # You can use the imported bmi_interpretation as reference or logging if needed.
-    interpretations = {
-        "Underweight": "May indicate nutritional deficiency or other conditions",
-        "Normal weight": "Healthy weight range for your height",
-        "Overweight": "Increased risk for health conditions",
-        "Obese": "High risk for serious health conditions"
-    }
-    return interpretations.get(category, "Consult a healthcare provider for personalized advice")
 
 def clean_response(response):
     # Remove unnecessary disclaimers while keeping safety notices

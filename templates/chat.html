@@ -24,7 +24,7 @@
         <div class="message">
           Hello, I'm MediBot, your AI medical assistant. I can help assess symptoms, analyze images, and provide general health information. Please describe your concern.
         </div>
-        <button class="icon-btn speech-response-btn" data-speaking="false" title="Speak Response" 
+        <button class="icon-btn speech-response-btn" data-speaking="false" title="Speak Response"
                 onclick="toggleResponseSpeech(this, `Hello! I'm MediBot, your AI medical assistant...`)">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
@@ -55,7 +55,6 @@
             <polyline points="21 15 16 10 5 21"></polyline>
           </svg>
         </button>
-        <!-- Added type="button" to ensure proper behavior -->
         <button id="send-btn" type="button">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
             <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -66,6 +65,8 @@
       <div class="tools-menu">
         <button class="tool-btn" onclick="showBmiCalculator()">BMI Calculator</button>
         <button class="tool-btn" onclick="showMedicationTracker()">Symptom Tracker</button>
+        <button class="tool-btn" onclick="openMoodTracker()">Mood Tracker</button>
+        <button class="tool-btn" onclick="openCbtExercise()">CBT Exercises</button>
       </div>
     </div>
   </div>
@@ -73,7 +74,7 @@
   <!-- BMI Calculator Modal -->
   <div id="bmi-modal" class="modal">
     <div class="modal-content">
-      <span class="close-btn" onclick="closeModal()">&times;</span>
+      <span class="close-btn" onclick="closeBmiModal()">&times;</span>
       <h2>BMI Calculator</h2>
       <div class="form-group">
         <label for="weight">Weight (kg):</label>
@@ -88,16 +89,114 @@
     </div>
   </div>
 
+  <!-- Mood Tracker Modal -->
+  <div id="mood-modal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" onclick="closeMoodTracker()">&times;</span>
+      <h2>Mood Tracker</h2>
+      <div class="form-group">
+        <label for="mood-rating">Rate your mood (1–10):</label>
+        <input type="range" id="mood-rating" min="1" max="10" value="5">
+        <span id="mood-value">5</span>/10
+      </div>
+      <div class="form-group">
+        <label for="mood-comment">Optional comment:</label>
+        <textarea id="mood-comment" placeholder="How are you feeling?" rows="3"
+                  style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;"></textarea>
+      </div>
+      <button class="calculate-btn" onclick="submitMoodRating()">Submit Mood</button>
+    </div>
+  </div>
+
+  <!-- CBT Exercises Modal -->
+  <div id="cbt-modal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" onclick="closeCbtExercise()">&times;</span>
+      <h2>CBT Thought Record</h2>
+      <div class="form-group">
+        <label for="situation">Situation:</label>
+        <textarea id="situation" placeholder="Describe the situation" rows="2"
+                  style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="thoughts">Automatic Thoughts:</label>
+        <textarea id="thoughts" placeholder="What went through your mind?" rows="2"
+                  style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="emotions">Emotions & Intensity:</label>
+        <input type="text" id="emotions" placeholder="E.g., Anxiety – 7/10"
+               style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;">
+      </div>
+      <div class="form-group">
+        <label for="alternative">Alternative Thoughts:</label>
+        <textarea id="alternative" placeholder="More balanced perspective" rows="2"
+                  style="width:100%;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:#fff;"></textarea>
+      </div>
+      <button class="calculate-btn" onclick="submitCbtExercise()">Submit CBT Exercise</button>
+    </div>
+  </div>
+
   <script>
-    // ================== Medical Chat Enhancements ==================
+    // Emergency keywords matching backend
+    const EMERGENCY_KEYWORDS = [
+      'faint', 'seizure', 'choking', 'bleeding', 
+      'unconscious', 'heart attack', 'overdose'
+    ];
+
+    // First aid protocols for emergency responses
+    const FIRST_AID_PROTOCOLS = {
+      'choking': `
+        <div class="emergency-alert">
+          <div class="emergency-header">🚨 CHOKING EMERGENCY</div>
+          <strong>Critical Actions:</strong>
+          <div class="bullet-point">Ask "Can you speak?"</div>
+          <div class="bullet-point">Give 5 back blows between shoulder blades</div>
+          <div class="bullet-point">Perform 5 abdominal thrusts (Heimlich maneuver)</div>
+          <div class="bullet-point">Call emergency services if person becomes unconscious</div>
+        </div>
+      `,
+      'heart attack': `
+        <div class="emergency-alert">
+          <div class="emergency-header">🚨 HEART ATTACK EMERGENCY</div>
+          <strong>Critical Actions:</strong>
+          <div class="bullet-point">Call emergency services immediately</div>
+          <div class="bullet-point">Have person sit down and stay calm</div>
+          <div class="bullet-point">Give aspirin if available and not allergic</div>
+          <div class="bullet-point">Prepare to perform CPR if person becomes unresponsive</div>
+        </div>
+      `,
+      'default': `
+        <div class="emergency-alert">
+          <div class="emergency-header">🚨 EMERGENCY SITUATION</div>
+          <div class="bullet-point">Call emergency services immediately</div>
+          <div class="bullet-point">Stay with the person and monitor their condition</div>
+          <div class="bullet-point">Do not move the person unless absolutely necessary</div>
+        </div>
+      `
+    };
+
+    function detectEmergency(query) {
+      const lowerQuery = query.toLowerCase();
+      for (const keyword of EMERGENCY_KEYWORDS) {
+        if (lowerQuery.includes(keyword)) {
+          return keyword;
+        }
+      }
+      return null;
+    }
+
+    function getEmergencyProtocol(keyword) {
+      return FIRST_AID_PROTOCOLS[keyword] || FIRST_AID_PROTOCOLS['default'];
+    }
+
     function sendMessage() {
       const input = document.getElementById('user-input');
       const query = input.value.trim();
       if (!query) return;
 
-      // Collect conversation history with speaker tags
       const chatHistory = Array.from(document.querySelectorAll('.user-message, .bot-message'))
-        .slice(-4) // Keep last 2 exchanges
+        .slice(-4)
         .map(msg => {
           const isUser = msg.classList.contains('user-message');
           return `${isUser ? 'Patient' : 'Doctor'}: ${msg.querySelector('.message').textContent}`;
@@ -111,68 +210,80 @@
       fetch('/chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ 
-          query: query,
-          history: chatHistory
-        })
+        body: JSON.stringify({ query, history: chatHistory })
       })
-      .then(response => response.json())
+      .then(res => res.json())
       .then(data => {
         loadingMsg.remove();
-        // Format the structured medical response
-        const formattedResponse = formatMedicalResponse(data.response);
-        addBotMessage(formattedResponse);
+        
+        let response = formatMedicalResponse(data.response);
+        
+        // Add emergency protocol if category is emergency
+        if (data.category === 'emergency') {
+          const emergencyType = detectEmergency(query);
+          response += getEmergencyProtocol(emergencyType);
+        }
+        
+        addBotMessage(response);
       })
-      .catch(error => {
+      .catch(err => {
         loadingMsg.remove();
         addBotMessage("Error processing your request. Please try again.");
-        console.error('API error:', error);
+        console.error(err);
       });
     }
 
     function formatMedicalResponse(text) {
-      return text
-        .replace(/\[Follow-up Questions\]/g, '<div class="section-title">Follow-up Questions</div>')
-        .replace(/\[Possible Explanations\]/g, '<div class="section-title">Possible Conditions</div>')
-        .replace(/\[Recommended Actions\]/g, '<div class="section-title">Recommended Actions</div>')
-        .replace(/\[When to Seek Help\]/g, '<div class="warning-box section-title">⚠️ When to Seek Immediate Help</div>')
+      // Format section headers
+      text = text
+        .replace(/\[Emergency Steps\]/g, '<div class="section-title">🚨 EMERGENCY STEPS</div>')
+        .replace(/\[Possible Emergency Causes\]/g, '<div class="section-title">POSSIBLE CAUSES</div>')
+        .replace(/\[When to Call EMS\]/g, '<div class="warning-box section-title">⚠️ WHEN TO CALL EMERGENCY SERVICES</div>')
+        .replace(/\[Do Not\]/g, '<div class="section-title">🚫 DO NOT</div>')
+        .replace(/\[Follow-up Questions\]/g, '<div class="section-title">FOLLOW-UP QUESTIONS</div>')
+        .replace(/\[Possible Conditions\]/g, '<div class="section-title">POSSIBLE CONDITIONS</div>')
+        .replace(/\[Recommended Actions\]/g, '<div class="section-title">RECOMMENDED ACTIONS</div>')
+        .replace(/\[Medication & Treatment\]/g, '<div class="section-title">MEDICATION & TREATMENT</div>')
+        .replace(/\[PHQ-2 Screening\]/g, '<div class="section-title">DEPRESSION SCREENING</div>')
+        .replace(/\[Coping Strategies\]/g, '<div class="section-title">COPING STRATEGIES</div>');
+
+      // Format bullet points and line breaks
+      text = text
         .replace(/\n/g, '<br>')
         .replace(/- (.*?)(<br>|$)/g, '<div class="bullet-point">$1</div>')
-        .replace(/\!\!(.*?)\!\!/g, '<span class="medical-term" title="Medical term">$1</span>');
+        .replace(/⚠️ (.*?)(<br>|$)/g, '<div class="bullet-point warning">⚠️ $1</div>')
+        .replace(/🚑 (.*?)(<br>|$)/g, '<div class="bullet-point emergency">🚑 $1</div>');
+
+      return text;
     }
 
     // ================== Image Upload ==================
-    document.getElementById('image-btn').addEventListener('click', () => {
-      document.getElementById('image-upload').click();
-    });
-
-    document.getElementById('image-upload').addEventListener('change', async (e) => {
+    document.getElementById('image-btn').addEventListener('click', () =>
+      document.getElementById('image-upload').click()
+    );
+    document.getElementById('image-upload').addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
-      
       if (file.size > 5 * 1024 * 1024) {
         addBotMessage("Please upload an image smaller than 5MB.");
         return;
       }
-      
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64Image = reader.result.split(',')[1];
+        const base64 = reader.result.split(',')[1];
         addUserMessage("Uploaded medical image for analysis");
-        
-        const loadingMsg = addBotMessage("Analyzing medical image...");
-        
+        const loading = addBotMessage("Analyzing medical image...");
         try {
-          const response = await fetch('/analyze-image', {
+          const res = await fetch('/analyze-image', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ image: base64Image })
+            body: JSON.stringify({ image: base64 })
           });
-          const data = await response.json();
-          loadingMsg.remove();
+          const data = await res.json();
+          loading.remove();
           addBotMessage(data.response);
-        } catch (error) {
-          loadingMsg.remove();
+        } catch {
+          loading.remove();
           addBotMessage("Image analysis failed. Please try again.");
         }
       };
@@ -181,23 +292,18 @@
 
     // ================== BMI Calculator ==================
     function calculateBmi() {
-      const weight = parseFloat(document.getElementById('weight').value);
-      const height = parseFloat(document.getElementById('height').value);
-      
-      if (!weight || !height) {
-        alert("Please enter both weight and height");
-        return;
-      }
-      
+      const w = parseFloat(document.getElementById('weight').value);
+      const h = parseFloat(document.getElementById('height').value);
+      if (!w || !h) { alert("Please enter both weight and height"); return; }
       fetch('/calculate-bmi', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ weight, height })
+        body: JSON.stringify({ weight: w, height: h })
       })
-      .then(response => response.json())
+      .then(res => res.json())
       .then(data => {
-        const resultDiv = document.getElementById('bmi-result');
-        resultDiv.innerHTML = `
+        const div = document.getElementById('bmi-result');
+        div.innerHTML = `
           <h3>Your BMI: ${data.bmi}</h3>
           <p>Category: ${data.category}</p>
           <p>${data.interpretation}</p>
@@ -206,144 +312,208 @@
             <div class="scale-item ${(18.5 <= data.bmi && data.bmi < 25) ? 'active' : ''}">Normal (18.5-24.9)</div>
             <div class="scale-item ${(25 <= data.bmi && data.bmi < 30) ? 'active' : ''}">Overweight (25-29.9)</div>
             <div class="scale-item ${data.bmi >= 30 ? 'active' : ''}">Obese (30+)</div>
-          </div>
-        `;
-        
-        addUserMessage(`BMI calculation: Weight ${weight}kg, Height ${height}cm`);
+          </div>`;
+        addUserMessage(`BMI calculation: Weight ${w}kg, Height ${h}cm`);
         addBotMessage(`Your BMI is ${data.bmi} (${data.category}). ${data.interpretation}`);
       })
-      .catch(error => {
-        alert("Error calculating BMI. Please try again.");
-      });
+      .catch(() => alert("Error calculating BMI. Please try again."));
+    }
+    function showBmiCalculator() {
+      document.getElementById('bmi-modal').style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeBmiModal() {
+      document.getElementById('bmi-modal').style.display = 'none';
+      document.body.style.overflow = 'auto';
     }
 
     // ================== Core Chat Functions ==================
     function addUserMessage(text) {
-      const chatHistory = document.getElementById('chat-history');
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'user-message';
-      messageDiv.innerHTML = `<div class="message">${text}</div>`;
-      chatHistory.appendChild(messageDiv);
-      chatHistory.scrollTop = chatHistory.scrollHeight;
+      const h = document.getElementById('chat-history');
+      const d = document.createElement('div');
+      d.className = 'user-message';
+      d.innerHTML = `<div class="message">${text}</div>`;
+      h.appendChild(d);
+      h.scrollTop = h.scrollHeight;
     }
-
-    function addBotMessage(text) {
-      const chatHistory = document.getElementById('chat-history');
-      const messageWrapper = document.createElement('div');
-      messageWrapper.className = 'bot-message';
-      
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message';
-      messageDiv.innerHTML = text;
-      messageWrapper.appendChild(messageDiv);
-
-      const speechBtn = document.createElement('button');
-      speechBtn.className = 'icon-btn speech-response-btn';
-      speechBtn.setAttribute('data-speaking', 'false');
-      speechBtn.title = 'Speak Response';
-      speechBtn.innerHTML = `
+    function addBotMessage(html) {
+      const h = document.getElementById('chat-history');
+      const w = document.createElement('div');
+      w.className = 'bot-message';
+      const m = document.createElement('div');
+      m.className = 'message';
+      m.innerHTML = html;
+      w.appendChild(m);
+      const btn = document.createElement('button');
+      btn.className = 'icon-btn speech-response-btn';
+      btn.setAttribute('data-speaking','false');
+      btn.title = 'Speak Response';
+      btn.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
           <line x1="12" y1="19" x2="12" y2="23"></line>
           <line x1="8" y1="23" x2="16" y2="23"></line>
-        </svg>
-      `;
-      speechBtn.addEventListener('click', function() {
-        toggleResponseSpeech(speechBtn, messageDiv.textContent);
-      });
-      messageWrapper.appendChild(speechBtn);
-
-      chatHistory.appendChild(messageWrapper);
-      chatHistory.scrollTop = chatHistory.scrollHeight;
-      return messageWrapper;
+        </svg>`;
+      btn.addEventListener('click', () => toggleResponseSpeech(btn, m.textContent));
+      w.appendChild(btn);
+      h.appendChild(w);
+      h.scrollTop = h.scrollHeight;
+      return w;
     }
 
-    // ================== Voice Functions ==================
+    // ================== Mood Tracker & CBT Functions ==================
+    document.getElementById('mood-rating').addEventListener('input', function() {
+      document.getElementById('mood-value').textContent = this.value;
+    });
+
+    function openMoodTracker() {
+      document.getElementById('mood-modal').style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+    function closeMoodTracker() {
+      document.getElementById('mood-modal').style.display = 'none';
+      document.body.style.overflow = 'auto';
+    }
+    function submitMoodRating() {
+      const rating = parseInt(document.getElementById('mood-rating').value);
+      const comment = document.getElementById('mood-comment').value.trim();
+      
+      let response = `Mood rating: ${rating}/10`;
+      if(comment) response += ` — ${comment}`;
+      
+      addUserMessage(response);
+      
+      let botResponse = "Thanks for sharing how you're feeling. ";
+      if(rating <= 4) {
+        botResponse += `
+          <div class="mental-health-alert">
+            <h4>💚 You Matter</h4>
+            <p>1. Try the 4-7-8 breathing: Inhale 4s, hold 7s, exhale 8s</p>
+            <p>2. Contact a trusted friend/family member right now</p>
+            <p>3. Crisis hotline: <button onclick="toggleHotline()">Show Numbers</button>
+              <div id="hotline-numbers" style="display:none">
+                US: 988 • UK: 116123 • IN: 9152987821
+              </div>
+            </p>
+            <p>Would you like help finding a <u>therapist near you</u>?</p>
+            <button class="therapy-search-btn" onclick="searchTherapists()">Yes, Find Help</button>
+          </div>`;
+      }
+      else if(rating <= 6) {
+        botResponse += `Consider trying a <button onclick="openCbtExercise()">CBT Exercise</button> to process your feelings.`;
+      }
+      else {
+        botResponse += "Glad to hear you're doing well! Keep tracking your mood daily.";
+      }
+      
+      addBotMessage(botResponse);
+      closeMoodTracker();
+    }
+
+    function toggleHotline() {
+      const el = document.getElementById('hotline-numbers');
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function searchTherapists() {
+      addBotMessage("I can help you find mental health professionals. What's your location (city/zip)?");
+    }
+
+    function openCbtExercise() {
+      document.getElementById('cbt-modal').style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+    function closeCbtExercise() {
+      document.getElementById('cbt-modal').style.display = 'none';
+      document.body.style.overflow = 'auto';
+    }
+    function submitCbtExercise() {
+      const s = document.getElementById('situation').value.trim();
+      const t = document.getElementById('thoughts').value.trim();
+      const e = document.getElementById('emotions').value.trim();
+      const a = document.getElementById('alternative').value.trim();
+      addUserMessage(`CBT Exercise:\nSituation: ${s}\nThoughts: ${t}\nEmotions: ${e}\nAlternative: ${a}`);
+      
+      let response = "Thanks for completing the CBT exercise. ";
+      if(e.toLowerCase().includes('depress') || e.toLowerCase().includes('sad') || parseInt(e.split('/')[0]) > 6) {
+        response += `
+          <div class="mental-health-alert">
+            <p>I notice you're experiencing strong emotions. Remember:</p>
+            <p>• Feelings are temporary, even when they feel overwhelming</p>
+            <p>• Consider scheduling a check-in with a therapist this week</p>
+            <p>• Try the <button onclick="openCbtExercise()">5-4-3-2-1 grounding technique</button> when distressed</p>
+          </div>`;
+      }
+      else {
+        response += "Reflect on these alternative thoughts regularly to build mental resilience.";
+      }
+      
+      addBotMessage(response);
+      closeCbtExercise();
+    }
+
+    // ================== Text-to-Speech & Voice ==================
     let isRecording = false;
     const voiceBtn = document.getElementById('voice-btn');
     let recognition;
-
     if ('webkitSpeechRecognition' in window) {
       recognition = new webkitSpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
-
       voiceBtn.addEventListener('click', () => {
-        if (!isRecording) {
-          recognition.start();
-          voiceBtn.classList.add('recording');
-        } else {
-          recognition.stop();
-          voiceBtn.classList.remove('recording');
-        }
+        if (!isRecording) { recognition.start(); voiceBtn.classList.add('recording'); }
+        else { recognition.stop(); voiceBtn.classList.remove('recording'); }
         isRecording = !isRecording;
       });
-
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        document.getElementById('user-input').value = transcript;
+      recognition.onresult = e => {
+        document.getElementById('user-input').value = e.results[0][0].transcript;
         voiceBtn.classList.remove('recording');
         isRecording = false;
       };
-
-      recognition.onerror = (event) => {
-        console.error('Speech recognition error', event.error);
+      recognition.onerror = e => {
+        console.error('Speech recognition error', e.error);
         voiceBtn.classList.remove('recording');
         isRecording = false;
       };
     } else {
       voiceBtn.style.display = 'none';
     }
-
-    // ================== Text-to-Speech ==================
     function toggleResponseSpeech(button, text) {
       if (button.getAttribute('data-speaking') === 'true') {
         window.speechSynthesis.cancel();
-        button.setAttribute('data-speaking', 'false');
+        button.setAttribute('data-speaking','false');
         return;
       }
-
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.onend = () => {
-        button.setAttribute('data-speaking', 'false');
-      };
-      window.speechSynthesis.speak(utterance);
-      button.setAttribute('data-speaking', 'true');
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 0.9;
+      utt.onend = () => button.setAttribute('data-speaking','false');
+      window.speechSynthesis.speak(utt);
+      button.setAttribute('data-speaking','true');
     }
 
-    // ================== Modal Controls ==================
-    function showBmiCalculator() {
-      document.getElementById('bmi-modal').style.display = 'block';
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeModal() {
-      document.getElementById('bmi-modal').style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-
-    function showMedicationTracker() {
-      alert("Symptom tracker coming in the next update!");
-    }
-
-    // Close modal when clicking outside
+    // ================== Modal Outside Click ==================
     window.onclick = function(event) {
-      const modal = document.getElementById('bmi-modal');
-      if (event.target == modal) {
-        closeModal();
-      }
-    }
+      const bmi = document.getElementById('bmi-modal');
+      const mood = document.getElementById('mood-modal');
+      const cbt  = document.getElementById('cbt-modal');
+      if (event.target === bmi) closeBmiModal();
+      if (event.target === mood) closeMoodTracker();
+      if (event.target === cbt)  closeCbtExercise();
+    };
 
-    // Send message on Enter key
-    document.getElementById('user-input').addEventListener('keypress', function(e) {
+    // ================== Send Handlers ==================
+    document.getElementById('user-input').addEventListener('keypress', e => {
       if (e.key === 'Enter') sendMessage();
     });
-
-    // Send message on send button click
     document.getElementById('send-btn').addEventListener('click', sendMessage);
+
+    // ===== Symptom Tracker stub =====
+    function showMedicationTracker() {
+      alert("Symptom Tracker will be available in the next version.");
+    }
   </script>
 </body>
 </html>
