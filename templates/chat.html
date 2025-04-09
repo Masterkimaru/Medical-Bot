@@ -454,45 +454,67 @@
       closeCbtExercise();
     }
 
-    // ================== Text-to-Speech & Voice ==================
+   // ================== Text-to-Speech & Voice ==================
     let isRecording = false;
     const voiceBtn = document.getElementById('voice-btn');
+    const userInput = document.getElementById('user-input');
+
+    // Use either the standard SpeechRecognition or the webkitSpeechRecognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition;
-    if ('webkitSpeechRecognition' in window) {
-      recognition = new webkitSpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;       // Remain active until stopped by the user
+      recognition.interimResults = false;  // Final results only for clarity
+      recognition.lang = 'en-US';          // Set the language to US English
+
       voiceBtn.addEventListener('click', () => {
-        if (!isRecording) { recognition.start(); voiceBtn.classList.add('recording'); }
-        else { recognition.stop(); voiceBtn.classList.remove('recording'); }
+        if (!isRecording) {
+          recognition.start();
+          voiceBtn.classList.add('recording');
+        } else {
+          recognition.stop();
+          voiceBtn.classList.remove('recording');
+        }
         isRecording = !isRecording;
       });
+
       recognition.onresult = e => {
-        document.getElementById('user-input').value = e.results[0][0].transcript;
-        voiceBtn.classList.remove('recording');
-        isRecording = false;
+        // Loop through all the results as they may come in batches;
+        // here we're concatenating them to update the input field.
+        let transcript = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          transcript += e.results[i][0].transcript;
+        }
+        userInput.value = transcript;
       };
+
       recognition.onerror = e => {
-        console.error('Speech recognition error', e.error);
+        console.error('Speech recognition error:', e.error);
         voiceBtn.classList.remove('recording');
         isRecording = false;
       };
     } else {
+      // If the Speech Recognition API is not supported, hide the voice button
       voiceBtn.style.display = 'none';
     }
+
     function toggleResponseSpeech(button, text) {
       if (button.getAttribute('data-speaking') === 'true') {
         window.speechSynthesis.cancel();
-        button.setAttribute('data-speaking','false');
+        button.setAttribute('data-speaking', 'false');
         return;
       }
       window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 0.9;
-      utt.onend = () => button.setAttribute('data-speaking','false');
-      window.speechSynthesis.speak(utt);
-      button.setAttribute('data-speaking','true');
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9;
+      utterance.onend = () => button.setAttribute('data-speaking', 'false');
+      window.speechSynthesis.speak(utterance);
+      button.setAttribute('data-speaking', 'true');
     }
+
+
 
     // ================== Modal Outside Click ==================
     window.onclick = function(event) {
