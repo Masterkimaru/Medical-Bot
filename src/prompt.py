@@ -11,6 +11,7 @@ system_prompt = (
     "   1. ⚠️ First action (emoji)\n"
     "   2. ⚠️ Second action\n"
     "   3. ⚠️ Monitoring instructions\n\n"
+    
     "   [Possible Emergency Causes]\n"
     "   1. Most likely cause\n"
     "   2. Secondary possibility\n\n"

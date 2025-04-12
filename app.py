@@ -18,6 +18,9 @@ from src.prompt import (
     bmi_interpretation
 )
 
+# Import the first aid video helper function
+from video_link import get_first_aid_video
+
 from pinecone import Pinecone, data
 from src.helper import download_hugging_face_embeddings
 from langchain_pinecone import Pinecone as LangchainPinecone
@@ -122,7 +125,7 @@ image_analyzer = QwenImageAnalyzer(OPENROUTER_API_KEY)
 
 # Emergency keywords detection
 EMERGENCY_KEYWORDS = {
-    'faint', 'seizure', 'choking', 'bleeding', 
+    'faint', 'seizure', 'choking', 'bleeding', 'stroke', 'nosebleed',
     'unconscious', 'heart attack', 'overdose'
 }
 
@@ -155,9 +158,12 @@ def chat():
         user_query = data['query']
         chat_history = data.get('history', [])
         
-        # Detect query category
+        # Detect query category and first aid video if applicable
         category = detect_query_category(user_query)
-
+        video_link = None
+        if category == "emergency":
+            video_link = get_first_aid_video(user_query)
+        
         # Retrieve relevant medical context
         docs = vector_store.similarity_search(user_query, k=3)
         context = "\n".join([doc.page_content for doc in docs]) if docs else "No specific medical context available"
@@ -176,9 +182,14 @@ def chat():
         raw_response = llm._call(formatted_prompt)
         response = clean_response(raw_response)
 
+        # Optionally append a video link if one is available
+        if video_link:
+            response += f"\n\nFor first aid instructions, please watch this video: {video_link}"
+
         return jsonify({
             'response': response,
             'category': category,
+            'video_link': video_link,
             'context_used': [doc.page_content[:100] + "..." for doc in docs]  # For debugging
         })
 

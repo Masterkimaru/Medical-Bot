@@ -1,7 +1,7 @@
 // Emergency keywords matching backend
 const EMERGENCY_KEYWORDS = [
   'faint', 'seizure', 'choking', 'bleeding', 
-  'unconscious', 'heart attack', 'overdose'
+  'nosebleed', 'unconscious', 'heart attack', 'overdose', 'stroke'
 ];
 
 // First aid protocols for emergency responses
@@ -50,11 +50,29 @@ function getEmergencyProtocol(keyword) {
   return FIRST_AID_PROTOCOLS[keyword] || FIRST_AID_PROTOCOLS['default'];
 }
 
+/**
+ * Transform a YouTube URL (e.g., "youtu.be" or "watch?v=") into the embed format.
+ */
+function transformYoutubeUrl(url) {
+  if (url.includes("youtu.be/")) {
+    // For shortened URLs, extract the video ID and form the embed URL.
+    const parts = url.split("youtu.be/");
+    const idAndQuery = parts[1]; // Might include query parameters, e.g., "?si=..."
+    return "https://www.youtube.com/embed/" + idAndQuery;
+  } else if (url.includes("watch?v=")) {
+    // Replace watch?v= with embed/
+    return url.replace("watch?v=", "embed/");
+  }
+  // If the URL is already in embed format or another type, return as-is.
+  return url;
+}
+
 function sendMessage() {
   const input = document.getElementById('user-input');
   const query = input.value.trim();
   if (!query) return;
 
+  // Capture the last four chat entries for conversation history
   const chatHistory = Array.from(document.querySelectorAll('.user-message, .bot-message'))
     .slice(-4)
     .map(msg => {
@@ -72,25 +90,41 @@ function sendMessage() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ query, history: chatHistory })
   })
-  .then(res => res.json())
-  .then(data => {
-    loadingMsg.remove();
-    
-    let response = formatMedicalResponse(data.response);
-    
-    // Add emergency protocol if category is emergency
-    if (data.category === 'emergency') {
-      const emergencyType = detectEmergency(query);
-      response += getEmergencyProtocol(emergencyType);
-    }
-    
-    addBotMessage(response);
-  })
-  .catch(err => {
-    loadingMsg.remove();
-    addBotMessage("Error processing your request. Please try again.");
-    console.error(err);
-  });
+    .then(res => res.json())
+    .then(data => {
+      loadingMsg.remove();
+
+      // Format the medical response coming from the backend
+      let response = formatMedicalResponse(data.response);
+
+      // Append emergency protocol if the response category is emergency
+      if (data.category === 'emergency') {
+        const emergencyType = detectEmergency(query);
+        response += getEmergencyProtocol(emergencyType);
+      }
+      
+      // Append the video embed if a video link is returned from backend.
+      if (data.video_link) {
+        // Transform the URL into the embed format.
+        const embedUrl = transformYoutubeUrl(data.video_link);
+        response += `
+          <div class="video-container">
+            <iframe src="${embedUrl}" 
+                    frameborder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen>
+            </iframe>
+          </div>
+        `;
+      }
+      
+      addBotMessage(response);
+    })
+    .catch(err => {
+      loadingMsg.remove();
+      addBotMessage("Error processing your request. Please try again.");
+      console.error(err);
+    });
 }
 
 function formatMedicalResponse(text) {
@@ -178,6 +212,7 @@ function calculateBmi() {
   })
   .catch(() => alert("Error calculating BMI. Please try again."));
 }
+
 function showBmiCalculator() {
   document.getElementById('bmi-modal').style.display = 'block';
   document.body.style.overflow = 'hidden';
@@ -190,37 +225,42 @@ function closeBmiModal() {
 
 // ================== Core Chat Functions ==================
 function addUserMessage(text) {
-  const h = document.getElementById('chat-history');
-  const d = document.createElement('div');
-  d.className = 'user-message';
-  d.innerHTML = `<div class="message">${text}</div>`;
-  h.appendChild(d);
-  h.scrollTop = h.scrollHeight;
+  const historyContainer = document.getElementById('chat-history');
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'user-message';
+  messageDiv.innerHTML = `<div class="message">${text}</div>`;
+  historyContainer.appendChild(messageDiv);
+  historyContainer.scrollTop = historyContainer.scrollHeight;
 }
+
 function addBotMessage(html) {
-  const h = document.getElementById('chat-history');
-  const w = document.createElement('div');
-  w.className = 'bot-message';
-  const m = document.createElement('div');
-  m.className = 'message';
-  m.innerHTML = html;
-  w.appendChild(m);
+  const historyContainer = document.getElementById('chat-history');
+  const messageWrapper = document.createElement('div');
+  messageWrapper.className = 'bot-message';
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'message';
+  messageDiv.innerHTML = html;
+  messageWrapper.appendChild(messageDiv);
+  
   const btn = document.createElement('button');
   btn.className = 'icon-btn speech-response-btn';
-  btn.setAttribute('data-speaking','false');
+  btn.setAttribute('data-speaking', 'false');
   btn.title = 'Speak Response';
   btn.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" 
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" 
+         stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
       <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
       <line x1="12" y1="19" x2="12" y2="23"></line>
       <line x1="8" y1="23" x2="16" y2="23"></line>
     </svg>`;
-  btn.addEventListener('click', () => toggleResponseSpeech(btn, m.textContent));
-  w.appendChild(btn);
-  h.appendChild(w);
-  h.scrollTop = h.scrollHeight;
-  return w;
+  btn.addEventListener('click', () => toggleResponseSpeech(btn, messageDiv.textContent));
+  
+  messageWrapper.appendChild(btn);
+  historyContainer.appendChild(messageWrapper);
+  historyContainer.scrollTop = historyContainer.scrollHeight;
+  return messageWrapper;
 }
 
 // ================== Mood Tracker & CBT Functions ==================
@@ -232,10 +272,12 @@ function openMoodTracker() {
   document.getElementById('mood-modal').style.display = 'block';
   document.body.style.overflow = 'hidden';
 }
+
 function closeMoodTracker() {
   document.getElementById('mood-modal').style.display = 'none';
   document.body.style.overflow = 'auto';
 }
+
 function submitMoodRating() {
   const rating = parseInt(document.getElementById('mood-rating').value);
   const comment = document.getElementById('mood-comment').value.trim();
@@ -285,10 +327,12 @@ function openCbtExercise() {
   document.getElementById('cbt-modal').style.display = 'block';
   document.body.style.overflow = 'hidden';
 }
+
 function closeCbtExercise() {
   document.getElementById('cbt-modal').style.display = 'none';
   document.body.style.overflow = 'auto';
 }
+
 function submitCbtExercise() {
   const s = document.getElementById('situation').value.trim();
   const t = document.getElementById('thoughts').value.trim();
@@ -372,12 +416,12 @@ function toggleResponseSpeech(button, text) {
 
 // ================== Modal Outside Click ==================
 window.onclick = function(event) {
-  const bmi = document.getElementById('bmi-modal');
-  const mood = document.getElementById('mood-modal');
-  const cbt  = document.getElementById('cbt-modal');
-  if (event.target === bmi) closeBmiModal();
-  if (event.target === mood) closeMoodTracker();
-  if (event.target === cbt)  closeCbtExercise();
+  const bmiModal = document.getElementById('bmi-modal');
+  const moodModal = document.getElementById('mood-modal');
+  const cbtModal = document.getElementById('cbt-modal');
+  if (event.target === bmiModal) closeBmiModal();
+  if (event.target === moodModal) closeMoodTracker();
+  if (event.target === cbtModal) closeCbtExercise();
 };
 
 // ================== Send Handlers ==================
