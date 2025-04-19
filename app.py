@@ -444,5 +444,6 @@ def health_check():
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  # Defaults to 5000 if PORT isn't set
-    app.run(debug=True, host='0.0.0.0', port=port)
+    port = int(os.environ['PORT'])  # No default value; Render sets this
+    app.run(debug=False, host='0.0.0.0', port=port)
+
