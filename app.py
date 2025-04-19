@@ -9,6 +9,21 @@ import base64
 from datetime import datetime
 from flask_cors import CORS
 from pymongo import MongoClient
+import nltk
+
+# ===== NLTK DATA SETUP =====
+NLTK_DATA_PATH = "/opt/render/nltk_data"
+os.environ['NLTK_DATA'] = NLTK_DATA_PATH
+Path(NLTK_DATA_PATH).mkdir(parents=True, exist_ok=True)
+
+try:
+    nltk.download('punkt_tab', download_dir=NLTK_DATA_PATH)
+    nltk.download('punkt', download_dir=NLTK_DATA_PATH)
+    nltk.download('wordnet', download_dir=NLTK_DATA_PATH)
+    nltk.download('stopwords', download_dir=NLTK_DATA_PATH)
+    print("✅ NLTK data downloaded successfully")
+except Exception as e:
+    print(f"❌ NLTK download error: {str(e)}")
 
 # Import all prompt definitions from src/prompt.py
 from src.prompt import (
