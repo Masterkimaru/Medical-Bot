@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 import os
 from pathlib import Path
@@ -6,20 +6,25 @@ import sys
 import re
 import requests
 import base64
-from io import BytesIO
-from PIL import Image
 from datetime import datetime
+from flask_cors import CORS
+from pymongo import MongoClient
 
 # Import all prompt definitions from src/prompt.py
 from src.prompt import (
     system_prompt, 
     emergency_subprompt,
     image_analysis_prompt,
-    bmi_interpretation
+    bmi_interpretation,
+    mood_tracking_prompt,
+    cbt_exercises_prompt
 )
 
 # Import the first aid video helper function
 from video_link import get_first_aid_video
+
+# Import helper to find on-site professionals
+from src.helper_pros import find_relevant_professionals
 
 from pinecone import Pinecone, data
 from src.helper import download_hugging_face_embeddings
@@ -27,7 +32,21 @@ from langchain_pinecone import Pinecone as LangchainPinecone
 from langchain.llms.base import LLM
 from pydantic import Field
 
+# Load environment variables (you already have load_dotenv earlier)
+MONGODB_URI    = os.environ.get("MONGODB_URI")
+MONGODB_DB     = os.environ.get("MONGODB_DB_NAME", "medi_bot")
+
+mongo_client   = MongoClient(MONGODB_URI)
+db             = mongo_client[MONGODB_DB]
+symptoms_col   = db["symptoms"]
+
+# Initialize Flask app with CORS
 app = Flask(__name__)
+CORS(app, origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://medibot-frontend-eight.vercel.app"
+])
 
 # Add the 'src' directory to the Python path
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -102,7 +121,6 @@ class QwenImageAnalyzer:
 
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
-        
         payload = {
             "model": "qwen/qwen2.5-vl-72b-instruct:free",
             "messages": [{
@@ -115,7 +133,6 @@ class QwenImageAnalyzer:
             "temperature": 0.4,
             "max_tokens": 1000
         }
-
         response = requests.post(url, headers=self.headers, json=payload)
         response.raise_for_status()
         return response.json()['choices'][0]['message']['content']
@@ -126,8 +143,16 @@ image_analyzer = QwenImageAnalyzer(OPENROUTER_API_KEY)
 # Emergency keywords detection
 EMERGENCY_KEYWORDS = {
     'faint', 'seizure', 'choking', 'bleeding', 'stroke', 'nosebleed',
-    'unconscious', 'heart attack', 'overdose'
+    'unconscious', 'heart attack', 'overdose', 'cardiac arrest', 'no pulse',
+    'not breathing', 'gasping', 'CPR', 'AED', 'chest pain', 'tight chest',
+    'unresponsive', 'dizzy', 'confused', 'slurred speech', 'numbness', 'paralyzed',
+    'broken bone', 'fracture', 'head injury', 'concussion', 'burn', 'cut', 'sprain',
+    'deep wound', 'heavy bleeding', 'open fracture', 'hypothermia', 'heat-stroke',
+    'frostbite', 'dehydration', 'drowning', 'allergic reaction', 'anaphylaxis',
+    'epipen', 'bee sting', 'snake bite', 'poisoning', 'infant not breathing',
+    'baby choking', 'child unresponsive'
 }
+
 
 def detect_query_category(query):
     """Determine if query is emergency or normal"""
@@ -135,6 +160,33 @@ def detect_query_category(query):
     if any(keyword in query_lower for keyword in EMERGENCY_KEYWORDS):
         return "emergency"
     return "non-emergency"
+
+# === Kimi LLM for Mental Health ===
+class KimiLLM(LLM):
+    api_key: str = Field(..., description="OpenRouter API key")
+    temperature: float = Field(0.4, description="Sampling temperature")
+    max_tokens: int = Field(1500, description="Maximum tokens")
+
+    @property
+    def _llm_type(self) -> str:
+        return "kimi-vl-a3b-thinking"
+
+    def _call(self, prompt: str, stop=None) -> str:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": "moonshotai/kimi-vl-a3b-thinking:free",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": False
+        }
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+# Initialize Kimi LLM
+kimi_llm = KimiLLM(api_key=OPENROUTER_API_KEY, temperature=0.4, max_tokens=1500)
 
 # Mock wearable data integration
 def get_wearable_data():
@@ -147,63 +199,80 @@ def get_wearable_data():
         "oxygen_saturation": 98
     }
 
-@app.route('/')
-def index():
-    return render_template('chat.html')
-
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        data = request.json
-        user_query = data['query']
+        data = request.get_json(force=True) or {}
+        user_query = data.get('query')
         chat_history = data.get('history', [])
-        
-        # Detect query category and first aid video if applicable
+
+        if not user_query:
+            return jsonify({'error': 'Query is missing.'}), 400
+
+        # Normalize history into “sender: text” strings
+        if chat_history and isinstance(chat_history[0], dict):
+            chat_history = [
+                f"{m.get('sender','unknown')}: {m.get('text','')}"
+                for m in chat_history
+            ]
+
+        # Detect emergency vs. normal
         category = detect_query_category(user_query)
         video_link = None
-        if category == "emergency":
+        if category == 'emergency':
             video_link = get_first_aid_video(user_query)
-        
-        # Retrieve relevant medical context
-        docs = vector_store.similarity_search(user_query, k=3)
-        context = "\n".join([doc.page_content for doc in docs]) if docs else "No specific medical context available"
 
-        # Format the prompt with the new structure
+        # Retrieve context from Pinecone
+        docs = vector_store.similarity_search(user_query, k=3)
+        context = "\n".join(d.page_content for d in docs) if docs else ""
+
+        # Build and call the LLM prompt
         formatted_prompt = system_prompt.format(
             query=user_query,
-            history="\n".join(chat_history[-3:]),  # Last 3 exchanges
+            history="\n".join(chat_history[-3:]),
             category=category
         )
-
-        # For emergencies, append the emergency subprompt
-        if category == "emergency":
+        if category == 'emergency':
             formatted_prompt += "\n\n" + emergency_subprompt
 
         raw_response = llm._call(formatted_prompt)
         response = clean_response(raw_response)
 
-        # Optionally append a video link if one is available
+        # Append specialists if any
+        pros = find_relevant_professionals(user_query, max_results=2)
+        if pros:
+            response += "\n\nFor specialized care at Metro Hospital, you may contact:"
+            for p in pros:
+                response += (
+                    f"\n- {p['name']} ({p['specialty']}), 📞 {p['phone']}, ✉️ {p['email']}"
+                )
+
+        # ★ Inject the first‑aid video link into the response text ★
         if video_link:
-            response += f"\n\nFor first aid instructions, please watch this video: {video_link}"
+            response += f"\n\n**First‑Aid Video:** {video_link}"
 
         return jsonify({
-            'response': response,
-            'category': category,
-            'video_link': video_link,
-            'context_used': [doc.page_content[:100] + "..." for doc in docs]  # For debugging
+            'response':     response,
+            'category':     category,
+            'video_link':   video_link,
+            'context_used': [d.page_content[:100] + "..." for d in docs]
         })
 
     except Exception as e:
+        print("❌ Error in /chat endpoint:", e)
         return jsonify({
             'response': "⚠️ Medical analysis error. Please try again or consult a doctor directly.",
-            'error': str(e)
+            'error':    str(e)
         }), 500
+
 
 @app.route('/analyze-image', methods=['POST'])
 def handle_image_analysis():
     try:
-        data = request.json
-        base64_image = data['image']
+        data = request.get_json(force=True) or {}
+        base64_image = data.get('image')
+        if not base64_image:
+            return jsonify({'error': 'Image is missing'}), 400
         
         analysis = image_analyzer.analyze_image(base64_image, image_analysis_prompt)
         return jsonify({
@@ -212,6 +281,7 @@ def handle_image_analysis():
         })
     
     except Exception as e:
+        print("❌ Error in /analyze-image endpoint:", e)
         return jsonify({
             'error': f"Image analysis failed: {str(e)}",
             'type': 'error'
@@ -220,10 +290,13 @@ def handle_image_analysis():
 @app.route('/calculate-bmi', methods=['POST'])
 def calculate_bmi():
     try:
-        data = request.json
-        weight = float(data['weight'])
-        height = float(data['height'])
-        
+        data = request.get_json(force=True) or {}
+        weight = float(data.get('weight', 0))
+        height = float(data.get('height', 0))
+
+        if not weight or not height:
+            return jsonify({'error': 'Weight or height is missing.'}), 400
+
         bmi = weight / ((height/100) ** 2)
         
         if bmi < 18.5:
@@ -248,10 +321,70 @@ def calculate_bmi():
             'type': 'bmi_result'
         })
     except Exception as e:
+        print("❌ Error in /calculate-bmi endpoint:", e)
         return jsonify({
             'error': f"BMI calculation error: {str(e)}",
             'type': 'error'
         }), 400
+
+# Mental health endpoints
+@app.route('/mood', methods=['POST'])
+def mood_tracking():
+   
+
+    data = request.get_json(force=True) or {}
+
+    description = data.get('description')
+    mood_score = data.get('score')
+    tags = data.get('tags', [])
+
+    if not description or mood_score is None:
+        return jsonify({'error': 'Missing description or mood score.'}), 400
+
+    try:
+        # Format the mood prompt using structured input
+        prompt = mood_tracking_prompt.format(
+            description=description,
+            mood_score=mood_score,
+            tags=", ".join(tags)
+        )
+
+        result = kimi_llm._call(prompt)
+
+        # Remove internal monologue between ◁think▷ and ◁/think▷ (including tags)
+        cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
+
+        return jsonify({'response': cleaned_response, 'type': 'mood_tracking'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/cbt', methods=['POST'])
+def cbt_exercises():
+    data = request.get_json(force=True) or {}
+
+    concern = data.get('concern')
+    tried_strategies = data.get('tried_strategies', 'None')
+    desired_outcome = data.get('desired_outcome', 'Not specified')
+
+    if not concern:
+        return jsonify({'error': 'Concern is required.'}), 400
+
+    try:
+        # Format the CBT prompt using structured input
+        prompt = cbt_exercises_prompt.format(
+            concern=concern,
+            tried_strategies=tried_strategies,
+            desired_outcome=desired_outcome
+        )
+
+        result = kimi_llm._call(prompt)
+
+        # Remove internal monologue between ◁think▷ and ◁/think▷
+        cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
+
+        return jsonify({'response': cleaned_response, 'type': 'cbt_exercises'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def clean_response(response):
     # Remove unnecessary disclaimers while keeping safety notices
@@ -264,7 +397,52 @@ def clean_response(response):
     
     return response
 
+
+@app.route('/symptoms', methods=['POST'])
+def submit_symptom():
+    data = request.get_json(force=True) or {}
+
+    # 🛡️ Basic validation
+    required = ["date", "symptom", "severity"]
+    if not all(field in data and data[field] for field in required):
+        return jsonify({'error': 'Missing one of: date, symptom, severity'}), 400
+
+    # Build the document
+    doc = {
+        "date":        data["date"],
+        "symptom":     data["symptom"],
+        "severity":    data["severity"],
+        "duration":    data.get("duration"),
+        "triggers":    data.get("triggers", []),
+        "medications": data.get("medications"),
+        "notes":       data.get("notes"),
+        "created_at":  datetime.utcnow()
+    }
+
+    try:
+        result = symptoms_col.insert_one(doc)
+        return jsonify({
+            'status':      'ok',
+            'inserted_id': str(result.inserted_id)
+        }), 200
+
+    except Exception as e:
+        print("❌ Error inserting symptom:", e)
+        return jsonify({'error': str(e)}), 500
+
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'services': {
+            'pinecone': index.describe_index_stats() if PINECONE_API_KEY else 'disabled',
+            'llm': 'deepseek' if OPENROUTER_API_KEY else 'disabled'
+        }
+    })
+
 if __name__ == '__main__':
-    # On Render, PORT is guaranteed to be set.
-    port = int(os.environ['PORT'])
-    app.run(debug=False, host='0.0.0.0', port=port)
+    port = int(os.environ.get('PORT', 5000))  # Defaults to 5000 if PORT isn't set
+    app.run(debug=True, host='0.0.0.0', port=port)

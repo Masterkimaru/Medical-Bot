@@ -1,0 +1,262 @@
+[
+  {
+    "name": "Dr. Alice Mwangi",
+    "specialty": "Cardiology",
+    "phone": "+254 712 345678",
+    "email": "alice.mwangi@metro-hospital.ke",
+    "office": "Wing A, Room 101",
+    "keywords": ["heart","cardiac","chest pain","palpitations", "blood pressure", "arrhythmia", "ECG",
+      "hypertension","palpit","pressur","arrhythm","hyperten","bp","electrocardiogram","angina"
+    ]
+  },
+  {
+    "name": "Dr. Bernard Otieno",
+    "specialty": "Neurology",
+    "phone": "+254 733 987654",
+    "email": "bernard.otieno@metro-hospital.ke",
+    "office": "Wing B, Room 203",
+    "keywords": [ "headache", "migraine","seizures", "stroke","numbness","paralysis", "neuropathy", "brain",
+      "headach", "migrain","seizur","numb","neuropath","nerve","convulsion"
+    ]
+  },
+  {
+    "name": "Dr. Carol Njeri",
+    "specialty": "Pediatrics",
+    "phone": "+254 700 123456",
+    "email": "carol.njeri@metro-hospital.ke",
+    "office": "Children's Wing, Room 12",
+    "keywords": ["children","kids","infant", "baby","vaccination", "growth","development",
+      "fever","cough", "child", "vaccin", "pediatric","toddler", "newborn"
+    ]
+  },
+  {
+    "name": "Dr. David Kamau",
+    "specialty": "Orthopedic Surgery",
+    "phone": "+254 722 456789",
+    "email": "david.kamau@metro-hospital.ke",
+    "office": "Wing C, Room 305",
+    "keywords": ["bone","joint","fracture","dislocation", "arthritis","sports injury","orthopedic", "back pain",
+      "fractur","arthrit", "back", "bone break", "spinal"
+    ]
+  },
+  {
+    "name": "Dr. Evelyn Wambui",
+    "specialty": "Obstetrics & Gynecology",
+    "phone": "+254 711 234567",
+    "email": "evelyn.wambui@metro-hospital.ke",
+    "office": "Maternity Wing, Room 45",
+    "keywords": ["pregnancy","gynecology","menstruation", "birth","fertility","pelvic pain", "women",
+      "reproductive","pregnant","pregn","period", "menstru","childbirth"
+    ]
+  },
+  {
+    "name": "Dr. Felix Onyango",
+    "specialty": "Oncology",
+    "phone": "+254 734 567890",
+    "email": "felix.onyango@metro-hospital.ke",
+    "office": "Cancer Center, Room 10",
+    "keywords": ["cancer","tumor", "chemotherapy","radiation", "mass","lump", "oncology",
+      "biopsy", "cancerous","malignancy", "radiat","chemotherapi", "biop"
+    ]
+  },
+  {
+    "name": "Dr. Grace Achieng",
+    "specialty": "Dermatology",
+    "phone": "+254 701 345678",
+    "email": "grace.achieng@metro-hospital.ke",
+    "office": "Wing D, Room 150",
+    "keywords": ["skin","rash","rashes","itching","eczema","psoriasis","dermatitis","hives","acne","skin infection",
+      "itch","hive","eczem", "psoria", "dermatit", "derm", "allergic reaction"
+    ]
+  },
+  {
+    "name": "Dr. Henry Mwiti",
+    "specialty": "Psychiatry",
+    "phone": "+254 720 678901",
+    "email": "henry.mwiti@metro-hospital.ke",
+    "office": "Mental Health Wing, Room 22",
+    "keywords": ["depression","anxiety","mental","psychosis","bipolar","stress","PTSD", "psychiatrist",
+      "depress","anxiet","psychosi","stres","mental health","psychological"
+    ]
+  },
+  {
+    "name": "Dr. Irene Wanjiku",
+    "specialty": "Endocrinology",
+    "phone": "+254 735 789012",
+    "email": "irene.wanjiku@metro-hospital.ke",
+    "office": "Wing A, Room 210",
+    "keywords": ["diabetes","thyroid","hormones","metabolism","insulin","goiter","PCOS",
+      "adrenal","diabet","hormon","metabol","pcos", "blood sugar", "endocrine"
+    ]
+  },
+  {
+    "name": "Dr. James Kariuki",
+    "specialty": "Gastroenterology",
+    "phone": "+254 702 456789",
+    "email": "james.kariuki@metro-hospital.ke",
+    "office": "Wing B, Room 115",
+    "keywords": ["stomach","liver","constipation","diarrhea","ulcer", "abdomen",
+      "IBS","digestive","constip","diarrhe","ibs","gastro","GI"
+    ]
+  },
+  {
+    "name": "Dr. Linda Atieno",
+    "specialty": "Pulmonology",
+    "phone": "+254 736 890123",
+    "email": "linda.atieno@metro-hospital.ke",
+    "office": "Wing C, Room 220",
+    "keywords": ["lungs","asthma","COPD","shortness of breath","cough","bronchitis",
+      "chest","wheezing","lung", "breath","bronchiti","wheez","respiratory","pulmonary"
+    ]
+  },
+  {
+    "name": "Dr. Michael Ndungu",
+    "specialty": "Nephrology",
+    "phone": "+254 703 567890",
+    "email": "michael.ndungu@metro-hospital.ke",
+    "office": "Dialysis Center, Room 5",
+    "keywords": ["kidney","dialysis", "urine", "renal", "swelling", "nephritis", "creatinine",
+      "proteinuria","kidni","dialysi","urin","nephriti","renal failure","kidney stones"
+    ]
+  },
+  {
+    "name": "Dr. Nancy Mumbi",
+    "specialty": "Rheumatology",
+    "phone": "+254 737 901234",
+    "email": "nancy.mumbi@metro-hospital.ke",
+    "office": "Wing D, Room 180",
+    "keywords": ["arthritis","joint pain", "autoimmune","lupus","rheumatoid","inflammation","fatigue", "arthrit",
+      "autoimmun","inflamm", "lupu", "rheumato", "chronic pain","joint stiffness"
+    ]
+  },
+  {
+    "name": "Dr. Oscar Maina",
+    "specialty": "Urology",
+    "phone": "+254 704 678901",
+    "email": "oscar.maina@metro-hospital.ke",
+    "office": "Wing A, Room 310",
+    "keywords": ["urine","prostate","bladder", "UTI","testicles", "urethra", "erectile dysfunction",
+      "kidney stones","urin","prostat", "bladd", "uti", "erectil", "urinary tract infection"
+    ]
+  },
+  {
+    "name": "Dr. Patricia Chebet",
+    "specialty": "Ophthalmology",
+    "phone": "+254 738 012345",
+    "email": "patricia.chebet@metro-hospital.ke",
+    "office": "Eye Center, Room 8",
+    "keywords": ["eye","vision","blurred vision","glaucoma", "cataract","red eyes",
+      "ophthalmology","blur","glaucom","ocular","sight", "eye pain"
+    ]
+  },
+  {
+    "name": "Dr. Quincy Omondi",
+    "specialty": "ENT (Otolaryngology)",
+    "phone": "+254 705 789012",
+    "email": "quincy.omondi@metro-hospital.ke",
+    "office": "Wing B, Room 125",
+    "keywords": ["ear","nose","throat","sinus", "tonsils", "hearing", "ENT",
+      "hoarseness","sinu","otolaryngology", "earache","sinusitis"
+    ]
+  },
+  {
+    "name": "Dr. Rose Adhiambo",
+    "specialty": "General Surgery",
+    "phone": "+254 739 123456",
+    "email": "rose.adhiambo@metro-hospital.ke",
+    "office": "Surgical Wing, Room 30",
+    "keywords": ["surgery","appendix","hernia","lump","biopsy", "general surgery",
+      "incision","surg", "appendectomy","herniorrhaphy","operative"
+    ]
+  },
+  {
+    "name": "Dr. Samuel Gitau",
+    "specialty": "Anesthesiology",
+    "phone": "+254 706 890123",
+    "email": "samuel.gitau@metro-hospital.ke",
+    "office": "Surgical Wing, Room 32",
+    "keywords": ["anesthesia","sedation", "pain management","numbness","surgical support",
+      "anesthesi", "sedat","pain","numb","analgesia","pain relief"
+    ]
+  },
+  {
+    "name": "Dr. Teresa Nyambura",
+    "specialty": "Emergency Medicine",
+    "phone": "+254 740 234567",
+    "email": "teresa.nyambura@metro-hospital.ke",
+    "office": "ER Department",
+    "keywords": ["emergency","trauma","urgent","accident","resuscitation","ER","shock","emerg","accid",
+      "emergency room", "first aid"
+    ]
+  },
+  {
+    "name": "Dr. Victor Omollo",
+    "specialty": "Radiology",
+    "phone": "+254 707 901234",
+    "email": "victor.omollo@metro-hospital.ke",
+    "office": "Imaging Center, Room 1",
+    "keywords": ["x-ray","MRI","CT scan","ultrasound","imaging","diagnostic",
+      "xray", "ct","ultrasoun", "radiography","scan","radiologist"
+    ]
+  },
+  {
+    "name": "Dr. Winnie Akinyi",
+    "specialty": "Pathology",
+    "phone": "+254 741 345678",
+    "email": "winnie.akinyi@metro-hospital.ke",
+    "office": "Lab Complex, Room 15",
+    "keywords": ["lab test","biopsy","histology","blood test","diagnosis","specimen",
+      "tissue","lab","histolog","pathologist","analysis"
+    ]
+  },
+  {
+    "name": "Dr. Xavier Okoth",
+    "specialty": "Physical Medicine & Rehabilitation",
+    "phone": "+254 708 012345",
+    "email": "xavier.okoth@metro-hospital.ke",
+    "office": "Rehab Center, Room 3",
+    "keywords": ["rehabilitation","physiotherapy","mobility","recovery","stroke rehab","physical therapy","rehabilit",
+      "physiotherap","mobil","recover","pt","rehab","occupational therapy"
+    ]
+  },
+  {
+    "name": "Dr. Yvonne Nkatha",
+    "specialty": "Infectious Diseases",
+    "phone": "+254 742 456789",
+    "email": "yvonne.nkatha@metro-hospital.ke",
+    "office": "Wing C, Room 240",
+    "keywords": ["infection","HIV","fever","antibiotics","TB","viral","bacterial","infectious",
+      "infect","antibiotic","diseas","viral infection","bacterial infection"
+    ]
+  },
+  {
+    "name": "Dr. Zachary Mburu",
+    "specialty": "Family Medicine",
+    "phone": "+254 709 123456",
+    "email": "zachary.mburu@metro-hospital.ke",
+    "office": "Primary Care Center, Room 7",
+    "keywords": ["general","check-up","family","primary care","chronic","routine","cold","flu",
+      "gener", "check","famil","primary","general practice","annual exam","checkup"
+    ]
+  },
+  {
+    "name": "Dr. Amina Hassan",
+    "specialty": "Hematology",
+    "phone": "+254 743 567890",
+    "email": "amina.hassan@metro-hospital.ke",
+    "office": "Wing D, Room 190",
+    "keywords": ["blood","anemia","clotting","bleeding","leukemia", "hemoglobin","platelets","anemi",
+      "clott", "leukemi","hemoglobin","platelet","hematological", "blood disorder"
+    ]
+  },
+  {
+    "name": "Dr. Brian Simiyu",
+    "specialty": "Allergy & Immunology",
+    "phone": "+254 710 234567",
+    "email": "brian.simiyu@metro-hospital.ke",
+    "office": "Wing A, Room 215",
+    "keywords": ["allergy","asthma","sneezing","rash","immunodeficiency","immune","hay fever",
+      "allerg","sneez", "immun","hypersensitivity","allergic reaction"
+    ]
+  }
+]
