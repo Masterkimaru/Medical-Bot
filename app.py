@@ -458,6 +458,10 @@ def health_check():
         }
     })
 
+@app.route('/')
+def root():
+    return 'OK', 200
+
 if __name__ == '__main__':
     port = int(os.environ['PORT'])  # No default value; Render sets this
     app.run(debug=False, host='0.0.0.0', port=port)
