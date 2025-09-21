@@ -103,7 +103,7 @@ class DeepseekLLM(LLM):
         return "deepseek"
     
     def _call(self, prompt: str, stop=None) -> str:
-        url = "https://openrouter.ai/api/v1"
+        url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
