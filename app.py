@@ -103,13 +103,13 @@ class DeepseekLLM(LLM):
         return "deepseek"
     
     def _call(self, prompt: str, stop=None) -> str:
-        url = "https://openrouter.ai/api/v1"
+        url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "deepseek/deepseek-chat-v3.1:free",
+            "model": "deepseek/deepseek-v3.2",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
