@@ -126,18 +126,26 @@ class DeepseekLLM(LLM):
 # Initialize the Deepseek LLM
 llm = DeepseekLLM(api_key=OPENROUTER_API_KEY, temperature=0.4, max_tokens=2000)
 
-class QwenImageAnalyzer:
-    def __init__(self, api_key):
+# ===== GOOGLE GEMMA IMAGE ANALYZER =====
+class GemmaImageAnalyzer:
+    def __init__(self, api_key, site_url="", site_name=""):
         self.api_key = api_key
+        self.site_url = site_url
+        self.site_name = site_name
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+        # Add optional headers if provided
+        if self.site_url:
+            self.headers["HTTP-Referer"] = self.site_url
+        if self.site_name:
+            self.headers["X-OpenRouter-Title"] = self.site_name
 
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "qwen/qwen2.5-vl-72b-instruct:free",
+            "model": "google/gemma-3-27b-it:free",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -152,8 +160,15 @@ class QwenImageAnalyzer:
         response.raise_for_status()
         return response.json()['choices'][0]['message']['content']
 
-# Initialize Qwen analyzer
-image_analyzer = QwenImageAnalyzer(OPENROUTER_API_KEY)
+# Initialize Gemma image analyzer
+site_url = os.environ.get("SITE_URL", "")
+site_name = os.environ.get("SITE_NAME", "MediBot")
+
+image_analyzer = GemmaImageAnalyzer(
+    api_key=OPENROUTER_API_KEY,
+    site_url=site_url,
+    site_name=site_name
+)
 
 # Emergency keywords detection
 EMERGENCY_KEYWORDS = {
@@ -176,32 +191,53 @@ def detect_query_category(query):
         return "emergency"
     return "non-emergency"
 
-# === Kimi LLM for Mental Health ===
-class KimiLLM(LLM):
+# === Qwen LLM for Mental Health (replacing Kimi) ===
+class QwenMentalHealthLLM(LLM):
     api_key: str = Field(..., description="OpenRouter API key")
     temperature: float = Field(0.4, description="Sampling temperature")
     max_tokens: int = Field(1500, description="Maximum tokens")
+    site_url: str = Field("", description="Optional site URL for rankings")
+    site_name: str = Field("", description="Optional site title for rankings")
 
     @property
     def _llm_type(self) -> str:
-        return "kimi-vl-a3b-thinking"
+        return "qwen-next-80b"
 
     def _call(self, prompt: str, stop=None) -> str:
         url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        
+        # Prepare headers with optional site info
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        # Add optional headers if provided
+        if self.site_url:
+            headers["HTTP-Referer"] = self.site_url
+        if self.site_name:
+            headers["X-OpenRouter-Title"] = self.site_name
+        
         payload = {
-            "model": "moonshotai/kimi-k2.5",
+            "model": "qwen/qwen3-next-80b-a3b-instruct:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": False
         }
+        
         resp = requests.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
-# Initialize Kimi LLM
-kimi_llm = KimiLLM(api_key=OPENROUTER_API_KEY, temperature=0.4, max_tokens=1500)
+# Initialize Qwen Mental Health LLM
+mental_health_llm = QwenMentalHealthLLM(
+    api_key=OPENROUTER_API_KEY, 
+    temperature=0.4, 
+    max_tokens=1500,
+    site_url="https://your-site-url.com",  # Optional - replace with your actual site URL
+    site_name="MediBot"  # Optional - replace with your site name
+)
 
 # Mock wearable data integration
 def get_wearable_data():
@@ -286,14 +322,35 @@ def handle_image_analysis():
     try:
         data = request.get_json(force=True) or {}
         base64_image = data.get('image')
+        
         if not base64_image:
             return jsonify({'error': 'Image is missing'}), 400
         
+        # Optional: Add validation for image size
+        if len(base64_image) > 10 * 1024 * 1024:  # 10MB limit
+            return jsonify({'error': 'Image size too large. Maximum 10MB allowed.'}), 400
+        
+        # Analyze the image using Gemma model
         analysis = image_analyzer.analyze_image(base64_image, image_analysis_prompt)
+        
+        # Clean up the response if needed
+        analysis = analysis.strip()
+        
+        # Add disclaimer and safety notice
+        response_text = f"📸 **Image Analysis Results:**\n\n{analysis}\n\n---\n⚠️ **Important Note:** This analysis is for informational purposes only. Always consult with a qualified healthcare professional for medical advice, diagnosis, or treatment."
+        
         return jsonify({
-            'response': f"IMAGE ANALYSIS:\n{analysis}\n\nNOTE: Always verify with a healthcare professional",
-            'type': 'image_analysis'
+            'response': response_text,
+            'type': 'image_analysis',
+            'model_used': 'google/gemma-3-27b-it:free'
         })
+    
+    except requests.exceptions.RequestException as e:
+        print("❌ API Request Error in /analyze-image:", e)
+        return jsonify({
+            'error': f"Image analysis service temporarily unavailable. Please try again later.",
+            'type': 'error'
+        }), 503
     
     except Exception as e:
         print("❌ Error in /analyze-image endpoint:", e)
@@ -345,8 +402,6 @@ def calculate_bmi():
 # Mental health endpoints
 @app.route('/mood', methods=['POST'])
 def mood_tracking():
-   
-
     data = request.get_json(force=True) or {}
 
     description = data.get('description')
@@ -364,15 +419,20 @@ def mood_tracking():
             tags=", ".join(tags)
         )
 
-        result = kimi_llm._call(prompt)
+        # Use the new mental health LLM instead of kimi_llm
+        result = mental_health_llm._call(prompt)
 
-        # Remove internal monologue between ◁think▷ and ◁/think▷ (including tags)
+        # Clean response if needed (remove any thinking tags if present)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
+        
+        # Optional: Add a safety notice if not present
+        if "consult a healthcare professional" not in cleaned_response.lower():
+            cleaned_response += "\n\nNote: This is for mental wellness support. For crisis situations, please contact a mental health professional or emergency services."
 
         return jsonify({'response': cleaned_response, 'type': 'mood_tracking'})
     except Exception as e:
+        print("❌ Error in mood tracking:", e)
         return jsonify({'error': str(e)}), 500
-
 @app.route('/cbt', methods=['POST'])
 def cbt_exercises():
     data = request.get_json(force=True) or {}
@@ -392,13 +452,19 @@ def cbt_exercises():
             desired_outcome=desired_outcome
         )
 
-        result = kimi_llm._call(prompt)
+        # Use the new mental health LLM instead of kimi_llm
+        result = mental_health_llm._call(prompt)
 
-        # Remove internal monologue between ◁think▷ and ◁/think▷
+        # Clean response (remove any thinking tags if present)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
+        
+        # Optional: Add a safety notice if not present
+        if "consult a healthcare professional" not in cleaned_response.lower():
+            cleaned_response += "\n\nNote: These exercises are for self-help purposes. If you're experiencing severe distress, please seek professional support."
 
         return jsonify({'response': cleaned_response, 'type': 'cbt_exercises'})
     except Exception as e:
+        print("❌ Error in CBT exercises:", e)
         return jsonify({'error': str(e)}), 500
 
 def clean_response(response):
