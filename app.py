@@ -137,7 +137,7 @@ class QwenImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "qwen/qwen3.5-9b",
+            "model": "qwen/qwen2.5-vl-72b-instruct:free",
             "messages": [{
                 "role": "user",
                 "content": [
