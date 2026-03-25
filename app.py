@@ -137,7 +137,7 @@ class QwenImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "qwen/qwen2.5-vl-72b-instruct:free",
+            "model": "qwen/qwen3.5-9b",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -190,7 +190,7 @@ class KimiLLM(LLM):
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": "moonshotai/kimi-vl-a3b-thinking:free",
+            "model": "moonshotai/kimi-k2.5",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
