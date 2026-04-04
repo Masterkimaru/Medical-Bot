@@ -109,7 +109,7 @@ class DeepseekLLM(LLM):
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "deepseek/deepseek-v3.2",
+            "model": "qwen/qwen3.6-plus:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -145,7 +145,7 @@ class GemmaImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "google/gemma-3-27b-it:free",
+            "model": "qwen/qwen3.6-plus:free",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -219,7 +219,7 @@ class QwenMentalHealthLLM(LLM):
             headers["X-OpenRouter-Title"] = self.site_name
         
         payload = {
-            "model": "qwen/qwen3-next-80b-a3b-instruct:free",
+            "model": "qwen/qwen3.6-plus:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
