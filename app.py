@@ -100,7 +100,7 @@ class DeepseekLLM(LLM):
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "qwen/qwen3.6-plus:free",
+            "model": "arcee-ai/trinity-large-preview:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
