@@ -8,7 +8,6 @@ import requests
 import base64
 from datetime import datetime
 from flask_cors import CORS
-from pymongo import MongoClient
 import nltk
 
 # ===== NLTK DATA SETUP =====
@@ -46,14 +45,6 @@ from src.helper import download_hugging_face_embeddings
 from langchain_pinecone import Pinecone as LangchainPinecone
 from langchain.llms.base import LLM
 from pydantic import Field
-
-# Load environment variables (you already have load_dotenv earlier)
-MONGODB_URI    = os.environ.get("MONGODB_URI")
-MONGODB_DB     = os.environ.get("MONGODB_DB_NAME", "medi_bot")
-
-mongo_client   = MongoClient(MONGODB_URI)
-db             = mongo_client[MONGODB_DB]
-symptoms_col   = db["symptoms"]
 
 # Initialize Flask app with CORS
 app = Flask(__name__)
@@ -260,7 +251,7 @@ def chat():
         if not user_query:
             return jsonify({'error': 'Query is missing.'}), 400
 
-        # Normalize history into “sender: text” strings
+        # Normalize history into "sender: text" strings
         if chat_history and isinstance(chat_history[0], dict):
             chat_history = [
                 f"{m.get('sender','unknown')}: {m.get('text','')}"
@@ -433,6 +424,7 @@ def mood_tracking():
     except Exception as e:
         print("❌ Error in mood tracking:", e)
         return jsonify({'error': str(e)}), 500
+
 @app.route('/cbt', methods=['POST'])
 def cbt_exercises():
     data = request.get_json(force=True) or {}
@@ -478,41 +470,6 @@ def clean_response(response):
     
     return response
 
-
-@app.route('/symptoms', methods=['POST'])
-def submit_symptom():
-    data = request.get_json(force=True) or {}
-
-    # 🛡️ Basic validation
-    required = ["date", "symptom", "severity"]
-    if not all(field in data and data[field] for field in required):
-        return jsonify({'error': 'Missing one of: date, symptom, severity'}), 400
-
-    # Build the document
-    doc = {
-        "date":        data["date"],
-        "symptom":     data["symptom"],
-        "severity":    data["severity"],
-        "duration":    data.get("duration"),
-        "triggers":    data.get("triggers", []),
-        "medications": data.get("medications"),
-        "notes":       data.get("notes"),
-        "created_at":  datetime.utcnow()
-    }
-
-    try:
-        result = symptoms_col.insert_one(doc)
-        return jsonify({
-            'status':      'ok',
-            'inserted_id': str(result.inserted_id)
-        }), 200
-
-    except Exception as e:
-        print("❌ Error inserting symptom:", e)
-        return jsonify({'error': str(e)}), 500
-
-
-
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint for monitoring"""
@@ -531,4 +488,3 @@ def root():
 if __name__ == '__main__':
     port = int(os.environ['PORT'])  # No default value; Render sets this
     app.run(debug=False, host='0.0.0.0', port=port)
-
