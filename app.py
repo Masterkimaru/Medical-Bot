@@ -137,7 +137,7 @@ class GemmaImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "bytedance-seed/seedream-4.5",  # ByteDance Seedream model
+            "model": "nvidia/nemotron-3.5-content-safety:free",  # ByteDance Seedream model
             "messages": [{
                 "role": "user",
                 "content": [
@@ -384,7 +384,7 @@ def handle_image_analysis():
         return jsonify({
             'response': response_text,
             'type': 'image_analysis',
-            'model_used': 'bytedance-seed/seedream-4.5'
+            'model_used': 'nvidia/nemotron-3.5-content-safety:free'
         })
     
     except requests.exceptions.RequestException as e:
