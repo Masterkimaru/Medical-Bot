@@ -9,20 +9,44 @@ import base64
 from datetime import datetime
 from flask_cors import CORS
 import nltk
+import gc
+import time
+from functools import wraps
+from threading import Lock
 
-# ===== NLTK DATA SETUP =====
+# ===== MEMORY OPTIMIZATION =====
+# Force garbage collection on startup
+gc.collect()
+
+# ===== NLTK DATA SETUP (Optimized) =====
 NLTK_DATA_PATH = "/opt/render/nltk_data"
 os.environ['NLTK_DATA'] = NLTK_DATA_PATH
 Path(NLTK_DATA_PATH).mkdir(parents=True, exist_ok=True)
 
-try:
-    nltk.download('punkt_tab', download_dir=NLTK_DATA_PATH)
-    nltk.download('punkt', download_dir=NLTK_DATA_PATH)
-    nltk.download('wordnet', download_dir=NLTK_DATA_PATH)
-    nltk.download('stopwords', download_dir=NLTK_DATA_PATH)
-    print("✅ NLTK data downloaded successfully")
-except Exception as e:
-    print(f"❌ NLTK download error: {str(e)}")
+def setup_nltk():
+    """Lazy load NLTK data only if needed"""
+    try:
+        # Check if data already exists
+        from nltk.data import find
+        try:
+            find('tokenizers/punkt')
+            print("✅ NLTK data already exists")
+            return True
+        except LookupError:
+            pass
+            
+        # Download only what's needed with quiet mode
+        nltk.download('punkt', download_dir=NLTK_DATA_PATH, quiet=True)
+        nltk.download('wordnet', download_dir=NLTK_DATA_PATH, quiet=True)
+        nltk.download('stopwords', download_dir=NLTK_DATA_PATH, quiet=True)
+        print("✅ NLTK data downloaded successfully")
+        return True
+    except Exception as e:
+        print(f"⚠️ NLTK setup warning: {str(e)}")
+        return False
+
+# Call this after imports
+setup_nltk()
 
 # Import all prompt definitions from src/prompt.py
 from src.prompt import (
@@ -76,18 +100,34 @@ index = pc.Index(index_name)
 # Load embeddings and initialize the vector store
 embeddings = download_hugging_face_embeddings()
 
-# Connect to existing Pinecone index
-vector_store = LangchainPinecone(
-    index=index,
-    embedding=embeddings,
-    text_key="text"
-)
+# ===== LAZY LOADING FOR HEAVY INSTANCES =====
+_llm_instance = None
+_mental_health_llm = None
+_vector_store_instance = None
+_image_analyzer_instance = None
+_llm_lock = Lock()
+_mental_health_lock = Lock()
+_vector_store_lock = Lock()
+_image_analyzer_lock = Lock()
 
-# Define the Deepseek LLM class
+def get_vector_store():
+    """Lazy load vector store"""
+    global _vector_store_instance
+    if _vector_store_instance is None:
+        with _vector_store_lock:
+            if _vector_store_instance is None:
+                _vector_store_instance = LangchainPinecone(
+                    index=index,
+                    embedding=embeddings,
+                    text_key="text"
+                )
+    return _vector_store_instance
+
+# Define the Deepseek LLM class with reduced token usage
 class DeepseekLLM(LLM):
     api_key: str = Field(..., description="OpenRouter API key")
-    temperature: float = Field(0.4, description="Sampling temperature")
-    max_tokens: int = Field(2000, description="Maximum number of tokens to generate")
+    temperature: float = Field(0.3, description="Sampling temperature")  # Reduced
+    max_tokens: int = Field(1000, description="Maximum number of tokens to generate")  # Reduced from 2000
     
     @property
     def _llm_type(self) -> str:
@@ -106,19 +146,34 @@ class DeepseekLLM(LLM):
             "max_tokens": self.max_tokens,
             "stream": False
         }
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=25)
+            response.raise_for_status()
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout:
+            return "The request timed out. Please try with a shorter question."
+        except Exception as e:
+            print(f"❌ LLM Error: {e}")
+            return "I'm currently experiencing high load. Please try again in a moment."
     
     def get_num_tokens(self, text: str) -> int:
         return len(text.split())
 
-# Initialize the Deepseek LLM
-llm = DeepseekLLM(api_key=OPENROUTER_API_KEY, temperature=0.4, max_tokens=2000)
+def get_llm():
+    """Lazy load LLM instance"""
+    global _llm_instance
+    if _llm_instance is None:
+        with _llm_lock:
+            if _llm_instance is None:
+                _llm_instance = DeepseekLLM(
+                    api_key=OPENROUTER_API_KEY, 
+                    temperature=0.3, 
+                    max_tokens=1000
+                )
+    return _llm_instance
 
-# ===== GOOGLE GEMMA IMAGE ANALYZER =====
-# ===== BYTEDANCE SEEDREAM IMAGE ANALYZER =====
+# ===== GOOGLE GEMMA IMAGE ANALYZER (Optimized) =====
 class GemmaImageAnalyzer:
     def __init__(self, api_key, site_url="", site_name=""):
         self.api_key = api_key
@@ -128,7 +183,6 @@ class GemmaImageAnalyzer:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        # Add optional headers if provided
         if self.site_url:
             self.headers["HTTP-Referer"] = self.site_url
         if self.site_name:
@@ -137,7 +191,7 @@ class GemmaImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "nvidia/nemotron-3.5-content-safety:free",  # ByteDance Seedream model
+            "model": "nvidia/nemotron-3.5-content-safety:free",
             "messages": [{
                 "role": "user",
                 "content": [
@@ -145,65 +199,52 @@ class GemmaImageAnalyzer:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]
             }],
-            "temperature": 0.4,
-            "max_tokens": 1000
+            "temperature": 0.3,
+            "max_tokens": 500  # Reduced from 1000
         }
         
         try:
-            response = requests.post(url, headers=self.headers, json=payload)
+            response = requests.post(url, headers=self.headers, json=payload, timeout=20)
             response.raise_for_status()
             result = response.json()
             
-            # Add safety checks for the response structure
             if not result or 'choices' not in result:
-                print(f"❌ Unexpected API response structure: {result}")
-                return "Unable to analyze image. The API returned an unexpected response format."
+                return "Unable to analyze image. API returned unexpected format."
             
             if len(result['choices']) == 0:
-                print("❌ No choices in API response")
-                return "Unable to analyze image. No response generated by the model."
+                return "Unable to analyze image. No response generated."
             
             message = result['choices'][0].get('message', {})
             if not message or 'content' not in message:
-                print(f"❌ No content in message: {message}")
-                return "Unable to analyze image. The model didn't return any content."
+                return "Unable to analyze image. No content returned."
             
-            content = message['content']
-            if content is None:
-                print("❌ Content is None")
-                return "Unable to analyze image. The model returned an empty response."
+            return message['content'] or "Image analysis completed but returned empty result."
             
-            return content
-            
+        except requests.exceptions.Timeout:
+            return "Image analysis timed out. Please try with a smaller image."
         except requests.exceptions.RequestException as e:
-            print(f"❌ API Request Error: {e}")
-            # Check if it's a rate limit or authentication error
-            if hasattr(e, 'response') and e.response is not None:
-                if e.response.status_code == 429:
-                    return "Image analysis service is currently rate-limited. Please try again in a few minutes."
-                elif e.response.status_code == 401:
-                    return "Authentication error. Please check your API key."
-                elif e.response.status_code == 503:
-                    return "Image analysis service is temporarily unavailable. Please try again later."
-                elif e.response.status_code == 402:
-                    return "Payment required. Please check your OpenRouter credits."
-            return f"Unable to analyze image due to API error: {str(e)}"
-            
+            print(f"❌ Image API Error: {e}")
+            return "Image analysis service unavailable. Please try again later."
         except Exception as e:
-            print(f"❌ Unexpected error in analyze_image: {e}")
+            print(f"❌ Image analysis error: {e}")
             return f"Unable to analyze image: {str(e)}"
 
-# Initialize ByteDance Seedream image analyzer
-site_url = os.environ.get("SITE_URL", "")
-site_name = os.environ.get("SITE_NAME", "MediBot")
+def get_image_analyzer():
+    """Lazy load image analyzer"""
+    global _image_analyzer_instance
+    if _image_analyzer_instance is None:
+        with _image_analyzer_lock:
+            if _image_analyzer_instance is None:
+                site_url = os.environ.get("SITE_URL", "")
+                site_name = os.environ.get("SITE_NAME", "MediBot")
+                _image_analyzer_instance = GemmaImageAnalyzer(
+                    api_key=OPENROUTER_API_KEY,
+                    site_url=site_url,
+                    site_name=site_name
+                )
+    return _image_analyzer_instance
 
-image_analyzer = GemmaImageAnalyzer(
-    api_key=OPENROUTER_API_KEY,
-    site_url=site_url,
-    site_name=site_name
-)
-
-# Emergency keywords detection
+# Emergency keywords detection (optimized)
 EMERGENCY_KEYWORDS = {
     'faint', 'seizure', 'choking', 'bleeding', 'stroke', 'nosebleed',
     'unconscious', 'heart attack', 'overdose', 'cardiac arrest', 'no pulse',
@@ -212,23 +253,19 @@ EMERGENCY_KEYWORDS = {
     'broken bone', 'fracture', 'head injury', 'concussion', 'burn', 'cut', 'sprain',
     'deep wound', 'heavy bleeding', 'open fracture', 'hypothermia', 'heat-stroke',
     'frostbite', 'dehydration', 'drowning', 'allergic reaction', 'anaphylaxis',
-    'epipen', 'bee sting', 'snake bite', 'poisoning', 'infant not breathing',
-    'baby choking', 'child unresponsive'
+    'epipen', 'bee sting', 'snake bite', 'poisoning'
 }
 
-
 def detect_query_category(query):
-    """Determine if query is emergency or normal"""
+    """Determine if query is emergency or normal (optimized)"""
     query_lower = query.lower()
-    if any(keyword in query_lower for keyword in EMERGENCY_KEYWORDS):
-        return "emergency"
-    return "non-emergency"
+    return "emergency" if any(keyword in query_lower for keyword in EMERGENCY_KEYWORDS) else "non-emergency"
 
-# === Qwen LLM for Mental Health (replacing Kimi) ===
+# === Qwen LLM for Mental Health (Optimized) ===
 class QwenMentalHealthLLM(LLM):
     api_key: str = Field(..., description="OpenRouter API key")
-    temperature: float = Field(0.4, description="Sampling temperature")
-    max_tokens: int = Field(1500, description="Maximum tokens")
+    temperature: float = Field(0.3, description="Sampling temperature")  # Reduced
+    max_tokens: int = Field(800, description="Maximum tokens")  # Reduced from 1500
     site_url: str = Field("", description="Optional site URL for rankings")
     site_name: str = Field("", description="Optional site title for rankings")
 
@@ -239,13 +276,11 @@ class QwenMentalHealthLLM(LLM):
     def _call(self, prompt: str, stop=None) -> str:
         url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Prepare headers with optional site info
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         
-        # Add optional headers if provided
         if self.site_url:
             headers["HTTP-Referer"] = self.site_url
         if self.site_name:
@@ -259,29 +294,48 @@ class QwenMentalHealthLLM(LLM):
             "stream": False
         }
         
-        resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=20)
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout:
+            return "The request timed out. Please try again."
+        except Exception as e:
+            print(f"❌ Mental Health LLM Error: {e}")
+            return "I'm currently experiencing high load. Please try again later."
 
-# Initialize Qwen Mental Health LLM
-mental_health_llm = QwenMentalHealthLLM(
-    api_key=OPENROUTER_API_KEY, 
-    temperature=0.4, 
-    max_tokens=1500,
-    site_url="https://your-site-url.com",  # Optional - replace with your actual site URL
-    site_name="MediBot"  # Optional - replace with your site name
-)
+def get_mental_health_llm():
+    """Lazy load mental health LLM"""
+    global _mental_health_llm
+    if _mental_health_llm is None:
+        with _mental_health_lock:
+            if _mental_health_llm is None:
+                _mental_health_llm = QwenMentalHealthLLM(
+                    api_key=OPENROUTER_API_KEY, 
+                    temperature=0.3, 
+                    max_tokens=800,
+                    site_url="https://your-site-url.com",
+                    site_name="MediBot"
+                )
+    return _mental_health_llm
 
-# Mock wearable data integration
-def get_wearable_data():
-    """Simulate fetching wearable device data"""
-    return {
-        "heart_rate": 72,
-        "blood_pressure": "120/80",
-        "temperature": 98.6,
-        "last_sync": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "oxygen_saturation": 98
-    }
+# Clean response function (optimized)
+def clean_response(response):
+    """Clean the response and ensure safety notice"""
+    if not response:
+        return "I couldn't generate a response. Please try again."
+    
+    # Remove unnecessary AI disclaimers
+    response = re.sub(r"(as an ai(?: language)? model|i(?:'m| am) an? ai)", "", response, flags=re.IGNORECASE)
+    response = re.sub(r"\s+", " ", response).strip()
+    
+    # Add safety notice if not present
+    if "consult a healthcare professional" not in response.lower():
+        response += "\n\n⚠️ Note: Consult a healthcare professional for medical advice"
+    
+    return response
+
+# ===== ROUTES =====
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -293,62 +347,75 @@ def chat():
         if not user_query:
             return jsonify({'error': 'Query is missing.'}), 400
 
-        # Normalize history into "sender: text" strings
+        # Limit chat history to save memory
+        if chat_history and len(chat_history) > 3:
+            chat_history = chat_history[-3:]
+        
+        # Normalize history
         if chat_history and isinstance(chat_history[0], dict):
             chat_history = [
                 f"{m.get('sender','unknown')}: {m.get('text','')}"
                 for m in chat_history
             ]
 
-        # Detect emergency vs. normal
+        # Detect category
         category = detect_query_category(user_query)
         video_link = None
+        
+        # Get video only for emergencies
         if category == 'emergency':
             video_link = get_first_aid_video(user_query)
 
-        # Retrieve context from Pinecone
-        docs = vector_store.similarity_search(user_query, k=3)
+        # Get vector store (lazy loaded)
+        vector_store = get_vector_store()
+        
+        # Reduce number of documents retrieved
+        docs = vector_store.similarity_search(user_query, k=2)  # Reduced from 3
         context = "\n".join(d.page_content for d in docs) if docs else ""
 
-        # Build and call the LLM prompt
+        # Build prompt
+        history_text = "\n".join(chat_history[-2:]) if chat_history else ""  # Limit history
         formatted_prompt = system_prompt.format(
             query=user_query,
-            history="\n".join(chat_history[-3:]),
+            history=history_text,
             category=category
         )
+        
         if category == 'emergency':
             formatted_prompt += "\n\n" + emergency_subprompt
 
+        # Get LLM (lazy loaded)
+        llm = get_llm()
         raw_response = llm._call(formatted_prompt)
         response = clean_response(raw_response)
 
-        # Append specialists if any
-        pros = find_relevant_professionals(user_query, max_results=2)
+        # Get professionals (limit to 1 for memory)
+        pros = find_relevant_professionals(user_query, max_results=1)  # Reduced from 2
         if pros:
             response += "\n\nFor specialized care at Metro Hospital, you may contact:"
             for p in pros:
-                response += (
-                    f"\n- {p['name']} ({p['specialty']}), 📞 {p['phone']}, ✉️ {p['email']}"
-                )
+                response += f"\n- {p['name']} ({p['specialty']}), 📞 {p['phone']}"
 
-        # ★ Inject the first‑aid video link into the response text ★
+        # Add video link if available
         if video_link:
             response += f"\n\n**First‑Aid Video:** {video_link}"
 
+        # Force garbage collection
+        gc.collect()
+
         return jsonify({
-            'response':     response,
-            'category':     category,
-            'video_link':   video_link,
-            'context_used': [d.page_content[:100] + "..." for d in docs]
+            'response': response,
+            'category': category,
+            'video_link': video_link
         })
 
     except Exception as e:
         print("❌ Error in /chat endpoint:", e)
+        gc.collect()
         return jsonify({
-            'response': "⚠️ Medical analysis error. Please try again or consult a doctor directly.",
-            'error':    str(e)
+            'response': "⚠️ I'm experiencing high load. Please try again in a moment.",
+            'error': str(e)
         }), 500
-
 
 @app.route('/analyze-image', methods=['POST'])
 def handle_image_analysis():
@@ -359,45 +426,31 @@ def handle_image_analysis():
         if not base64_image:
             return jsonify({'error': 'Image is missing'}), 400
         
-        # Optional: Add validation for image size
-        if len(base64_image) > 10 * 1024 * 1024:  # 10MB limit
-            return jsonify({'error': 'Image size too large. Maximum 10MB allowed.'}), 400
+        # Limit image size
+        if len(base64_image) > 5 * 1024 * 1024:  # Reduced to 5MB
+            return jsonify({'error': 'Image size too large. Maximum 5MB allowed.'}), 400
         
-        # Validate image format (basic check)
-        if not base64_image.strip():
-            return jsonify({'error': 'Image data is empty'}), 400
-        
-        # Analyze the image using ByteDance Seedream model
+        # Get image analyzer (lazy loaded)
+        image_analyzer = get_image_analyzer()
         analysis = image_analyzer.analyze_image(base64_image, image_analysis_prompt)
         
-        # Check if analysis is None or empty
-        if analysis is None:
-            analysis = "Unable to analyze the image. The model didn't return a response."
-        elif isinstance(analysis, str):
-            analysis = analysis.strip()
-            if not analysis:
-                analysis = "The image analysis returned an empty response. Please try again with a clearer image."
+        if not analysis:
+            analysis = "Unable to analyze the image. Please try again."
         
-        # Add disclaimer and safety notice
         response_text = f"📸 **Image Analysis Results:**\n\n{analysis}\n\n---\n⚠️ **Important Note:** This analysis is for informational purposes only. Always consult with a qualified healthcare professional for medical advice, diagnosis, or treatment."
+        
+        gc.collect()
         
         return jsonify({
             'response': response_text,
-            'type': 'image_analysis',
-            'model_used': 'nvidia/nemotron-3.5-content-safety:free'
+            'type': 'image_analysis'
         })
-    
-    except requests.exceptions.RequestException as e:
-        print("❌ API Request Error in /analyze-image:", e)
-        return jsonify({
-            'error': f"Image analysis service temporarily unavailable. Please try again later.",
-            'type': 'error'
-        }), 503
     
     except Exception as e:
         print("❌ Error in /analyze-image endpoint:", e)
+        gc.collect()
         return jsonify({
-            'error': f"Image analysis failed: {str(e)}",
+            'error': f"Image analysis failed. Please try again.",
             'type': 'error'
         }), 500
 
@@ -408,8 +461,8 @@ def calculate_bmi():
         weight = float(data.get('weight', 0))
         height = float(data.get('height', 0))
 
-        if not weight or not height:
-            return jsonify({'error': 'Weight or height is missing.'}), 400
+        if not weight or not height or weight <= 0 or height <= 0:
+            return jsonify({'error': 'Valid weight and height are required.'}), 400
 
         bmi = weight / ((height/100) ** 2)
         
@@ -422,7 +475,6 @@ def calculate_bmi():
         else:
             category = "Obese"
             
-        # Format BMI interpretation using the prompt template
         interpretation = bmi_interpretation.format(
             bmi_value=round(bmi, 1),
             category=category
@@ -441,101 +493,114 @@ def calculate_bmi():
             'type': 'error'
         }), 400
 
-# Mental health endpoints
 @app.route('/mood', methods=['POST'])
 def mood_tracking():
-    data = request.get_json(force=True) or {}
-
-    description = data.get('description')
-    mood_score = data.get('score')
-    tags = data.get('tags', [])
-
-    if not description or mood_score is None:
-        return jsonify({'error': 'Missing description or mood score.'}), 400
-
     try:
-        # Format the mood prompt using structured input
+        data = request.get_json(force=True) or {}
+        description = data.get('description')
+        mood_score = data.get('score')
+        tags = data.get('tags', [])
+
+        if not description or mood_score is None:
+            return jsonify({'error': 'Missing description or mood score.'}), 400
+
+        # Get mental health LLM (lazy loaded)
+        mental_health_llm = get_mental_health_llm()
+        
         prompt = mood_tracking_prompt.format(
-            description=description,
+            description=description[:200],  # Limit description length
             mood_score=mood_score,
-            tags=", ".join(tags)
+            tags=", ".join(tags[:5])  # Limit tags
         )
 
-        # Use the new mental health LLM instead of kimi_llm
         result = mental_health_llm._call(prompt)
-
-        # Clean response if needed (remove any thinking tags if present)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
         
-        # Optional: Add a safety notice if not present
         if "consult a healthcare professional" not in cleaned_response.lower():
             cleaned_response += "\n\nNote: This is for mental wellness support. For crisis situations, please contact a mental health professional or emergency services."
 
+        gc.collect()
+        
         return jsonify({'response': cleaned_response, 'type': 'mood_tracking'})
     except Exception as e:
         print("❌ Error in mood tracking:", e)
+        gc.collect()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/cbt', methods=['POST'])
 def cbt_exercises():
-    data = request.get_json(force=True) or {}
-
-    concern = data.get('concern')
-    tried_strategies = data.get('tried_strategies', 'None')
-    desired_outcome = data.get('desired_outcome', 'Not specified')
-
-    if not concern:
-        return jsonify({'error': 'Concern is required.'}), 400
-
     try:
-        # Format the CBT prompt using structured input
+        data = request.get_json(force=True) or {}
+        concern = data.get('concern')
+        tried_strategies = data.get('tried_strategies', 'None')
+        desired_outcome = data.get('desired_outcome', 'Not specified')
+
+        if not concern:
+            return jsonify({'error': 'Concern is required.'}), 400
+
+        # Get mental health LLM (lazy loaded)
+        mental_health_llm = get_mental_health_llm()
+        
         prompt = cbt_exercises_prompt.format(
-            concern=concern,
-            tried_strategies=tried_strategies,
-            desired_outcome=desired_outcome
+            concern=concern[:200],  # Limit concern length
+            tried_strategies=tried_strategies[:200],
+            desired_outcome=desired_outcome[:200]
         )
 
-        # Use the new mental health LLM instead of kimi_llm
         result = mental_health_llm._call(prompt)
-
-        # Clean response (remove any thinking tags if present)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
         
-        # Optional: Add a safety notice if not present
         if "consult a healthcare professional" not in cleaned_response.lower():
             cleaned_response += "\n\nNote: These exercises are for self-help purposes. If you're experiencing severe distress, please seek professional support."
 
+        gc.collect()
+        
         return jsonify({'response': cleaned_response, 'type': 'cbt_exercises'})
     except Exception as e:
         print("❌ Error in CBT exercises:", e)
+        gc.collect()
         return jsonify({'error': str(e)}), 500
-
-def clean_response(response):
-    # Remove unnecessary disclaimers while keeping safety notices
-    response = re.sub(r"(as an ai(?: language)? model|i(?:'m| am) an? ai)", "", response, flags=re.IGNORECASE)
-    response = re.sub(r"\s+", " ", response).strip()
-    
-    # Ensure safety notice is present
-    if "consult a healthcare professional" not in response.lower():
-        response += "\n\nNote: Consult a healthcare professional for medical advice"
-    
-    return response
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint for monitoring"""
+    memory_mb = None
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        memory_mb = memory_info.rss / 1024 / 1024
+    except:
+        pass
+    
     return jsonify({
         'status': 'healthy',
+        'memory_mb': memory_mb,
         'services': {
-            'pinecone': index.describe_index_stats() if PINECONE_API_KEY else 'disabled',
-            'llm': 'deepseek' if OPENROUTER_API_KEY else 'disabled'
+            'pinecone': 'connected' if PINECONE_API_KEY else 'disabled',
+            'llm': 'available' if OPENROUTER_API_KEY else 'disabled'
         }
     })
+
+@app.route('/memory', methods=['GET'])
+def memory_check():
+    """Monitor memory usage"""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        return jsonify({
+            'memory_mb': round(memory_info.rss / 1024 / 1024, 2),
+            'memory_percent': round(process.memory_percent(), 2),
+            'cpu_percent': round(process.cpu_percent(), 2)
+        })
+    except:
+        return jsonify({'error': 'Memory monitoring not available'}), 500
 
 @app.route('/')
 def root():
     return 'OK', 200
 
 if __name__ == '__main__':
-    port = int(os.environ['PORT'])  # No default value; Render sets this
+    port = int(os.environ.get('PORT', 5000))  # Added default
     app.run(debug=False, host='0.0.0.0', port=port)
