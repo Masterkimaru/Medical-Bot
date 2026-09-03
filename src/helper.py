@@ -2,16 +2,9 @@ from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
-
 def load_pdf_file(data):
     """
     Extract data from PDF files in the specified directory.
-    
-    Args:
-        data (str): Path to directory containing PDF files
-        
-    Returns:
-        List[Document]: List of documents extracted from PDFs
     """
     loader = DirectoryLoader(
         data, 
@@ -21,16 +14,9 @@ def load_pdf_file(data):
     documents = loader.load()
     return documents
 
-
 def text_split(extracted_data):
     """
     Split documents into smaller text chunks for processing.
-    
-    Args:
-        extracted_data (List[Document]): List of documents to split
-        
-    Returns:
-        List[Document]: List of split document chunks
     """
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
@@ -39,15 +25,13 @@ def text_split(extracted_data):
     text_chunks = text_splitter.split_documents(extracted_data)
     return text_chunks
 
-
 def download_hugging_face_embeddings():
     """
     Download and initialize Hugging Face embeddings.
-    
-    Returns:
-        HuggingFaceEmbeddings: Initialized embeddings model
     """
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={'device': 'cpu'},
+        encode_kwargs={'normalize_embeddings': True}
     )
     return embeddings
