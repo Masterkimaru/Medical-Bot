@@ -193,7 +193,7 @@ class DeepseekLLM(LLM):
             "Content-Type": "application/json"
         }
         payload = {
-            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "model": "nvidia/nemotron-3.5-lightning:free",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -249,7 +249,7 @@ class GemmaImageAnalyzer:
     def analyze_image(self, base64_image, prompt):
         url = "https://openrouter.ai/api/v1/chat/completions"
         payload = {
-            "model": "nvidia/nemotron-3.5-content-safety:free",
+            "model": "nvidia/nemotron-3.5-lightning:free",
             "messages": [{
                 "role": "user",
                 "content": [
