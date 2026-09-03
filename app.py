@@ -8,45 +8,67 @@ import requests
 import base64
 from datetime import datetime
 from flask_cors import CORS
-import nltk
 import gc
 import time
 from functools import wraps
 from threading import Lock
+import logging
+import signal
+import resource
+from functools import lru_cache
+import hashlib
 
 # ===== MEMORY OPTIMIZATION =====
-# Force garbage collection on startup
+# Set memory limits (if on Linux)
+try:
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, -1))  # 512MB limit
+except:
+    pass
+
+# More aggressive garbage collection
+gc.set_threshold(700, 10, 5)
 gc.collect()
 
-# ===== NLTK DATA SETUP (Optimized) =====
+# Disable debug logging
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+
+# ===== NLTK LAZY LOADING =====
 NLTK_DATA_PATH = "/opt/render/nltk_data"
 os.environ['NLTK_DATA'] = NLTK_DATA_PATH
 Path(NLTK_DATA_PATH).mkdir(parents=True, exist_ok=True)
 
-def setup_nltk():
-    """Lazy load NLTK data only if needed"""
+_nltk_loaded = False
+
+def ensure_nltk_data():
+    """Lazy load NLTK data only when needed"""
+    global _nltk_loaded
+    if _nltk_loaded:
+        return True
+    
     try:
-        # Check if data already exists
+        import nltk
         from nltk.data import find
         try:
             find('tokenizers/punkt')
-            print("✅ NLTK data already exists")
+            _nltk_loaded = True
             return True
         except LookupError:
             pass
             
-        # Download only what's needed with quiet mode
+        # Download only what's needed
         nltk.download('punkt', download_dir=NLTK_DATA_PATH, quiet=True)
-        nltk.download('wordnet', download_dir=NLTK_DATA_PATH, quiet=True)
-        nltk.download('stopwords', download_dir=NLTK_DATA_PATH, quiet=True)
-        print("✅ NLTK data downloaded successfully")
+        # REMOVED wordnet - saves ~100MB memory
+        # REMOVED stopwords - not needed if not using in app.py
+        _nltk_loaded = True
+        print("✅ NLTK data loaded successfully")
         return True
     except Exception as e:
         print(f"⚠️ NLTK setup warning: {str(e)}")
         return False
 
-# Call this after imports
-setup_nltk()
+# Call this only when needed
+# ensure_nltk_data()  # Don't call here - lazy load
 
 # Import all prompt definitions from src/prompt.py
 from src.prompt import (
@@ -72,6 +94,12 @@ from pydantic import Field
 
 # Initialize Flask app with CORS
 app = Flask(__name__)
+
+# Optimize Flask configuration
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB limit
+app.config['JSON_AS_ASCII'] = False
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+
 CORS(app, origins=[
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -110,6 +138,26 @@ _mental_health_lock = Lock()
 _vector_store_lock = Lock()
 _image_analyzer_lock = Lock()
 
+# ===== SIMPLE CACHE FOR LLM RESPONSES =====
+_response_cache = {}
+_cache_lock = Lock()
+MAX_CACHE_SIZE = 15  # Limit cache size
+
+def get_cached_response(query):
+    """Get cached response if available"""
+    cache_key = hashlib.md5(query[:100].encode()).hexdigest()
+    with _cache_lock:
+        return _response_cache.get(cache_key)
+
+def cache_response(query, response):
+    """Cache a response"""
+    cache_key = hashlib.md5(query[:100].encode()).hexdigest()
+    with _cache_lock:
+        if len(_response_cache) >= MAX_CACHE_SIZE:
+            # Remove oldest entry
+            _response_cache.pop(next(iter(_response_cache)))
+        _response_cache[cache_key] = response
+
 def get_vector_store():
     """Lazy load vector store"""
     global _vector_store_instance
@@ -126,14 +174,19 @@ def get_vector_store():
 # Define the Deepseek LLM class with reduced token usage
 class DeepseekLLM(LLM):
     api_key: str = Field(..., description="OpenRouter API key")
-    temperature: float = Field(0.3, description="Sampling temperature")  # Reduced
-    max_tokens: int = Field(1000, description="Maximum number of tokens to generate")  # Reduced from 2000
+    temperature: float = Field(0.2, description="Sampling temperature")  # Reduced further
+    max_tokens: int = Field(500, description="Maximum number of tokens to generate")  # Reduced from 1000
     
     @property
     def _llm_type(self) -> str:
         return "deepseek"
     
     def _call(self, prompt: str, stop=None) -> str:
+        # Check cache first
+        cached = get_cached_response(prompt)
+        if cached:
+            return cached
+        
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -147,10 +200,15 @@ class DeepseekLLM(LLM):
             "stream": False
         }
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=25)
+            response = requests.post(url, headers=headers, json=payload, timeout=15)  # Reduced timeout
             response.raise_for_status()
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+            content = result["choices"][0]["message"]["content"]
+            
+            # Cache the response
+            cache_response(prompt, content)
+            return content
+            
         except requests.exceptions.Timeout:
             return "The request timed out. Please try with a shorter question."
         except Exception as e:
@@ -168,8 +226,8 @@ def get_llm():
             if _llm_instance is None:
                 _llm_instance = DeepseekLLM(
                     api_key=OPENROUTER_API_KEY, 
-                    temperature=0.3, 
-                    max_tokens=1000
+                    temperature=0.2, 
+                    max_tokens=500
                 )
     return _llm_instance
 
@@ -199,12 +257,12 @@ class GemmaImageAnalyzer:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]
             }],
-            "temperature": 0.3,
-            "max_tokens": 500  # Reduced from 1000
+            "temperature": 0.2,
+            "max_tokens": 300  # Reduced from 500
         }
         
         try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=20)
+            response = requests.post(url, headers=self.headers, json=payload, timeout=15)
             response.raise_for_status()
             result = response.json()
             
@@ -264,8 +322,8 @@ def detect_query_category(query):
 # === Qwen LLM for Mental Health (Optimized) ===
 class QwenMentalHealthLLM(LLM):
     api_key: str = Field(..., description="OpenRouter API key")
-    temperature: float = Field(0.3, description="Sampling temperature")  # Reduced
-    max_tokens: int = Field(800, description="Maximum tokens")  # Reduced from 1500
+    temperature: float = Field(0.2, description="Sampling temperature")  # Reduced
+    max_tokens: int = Field(400, description="Maximum tokens")  # Reduced from 800
     site_url: str = Field("", description="Optional site URL for rankings")
     site_name: str = Field("", description="Optional site title for rankings")
 
@@ -274,6 +332,11 @@ class QwenMentalHealthLLM(LLM):
         return "qwen-next-80b"
 
     def _call(self, prompt: str, stop=None) -> str:
+        # Check cache
+        cached = get_cached_response(prompt)
+        if cached:
+            return cached
+        
         url = "https://openrouter.ai/api/v1/chat/completions"
         
         headers = {
@@ -295,9 +358,11 @@ class QwenMentalHealthLLM(LLM):
         }
         
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=20)
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            content = resp.json()["choices"][0]["message"]["content"]
+            cache_response(prompt, content)
+            return content
         except requests.exceptions.Timeout:
             return "The request timed out. Please try again."
         except Exception as e:
@@ -312,8 +377,8 @@ def get_mental_health_llm():
             if _mental_health_llm is None:
                 _mental_health_llm = QwenMentalHealthLLM(
                     api_key=OPENROUTER_API_KEY, 
-                    temperature=0.3, 
-                    max_tokens=800,
+                    temperature=0.2, 
+                    max_tokens=400,
                     site_url="https://your-site-url.com",
                     site_name="MediBot"
                 )
@@ -325,15 +390,39 @@ def clean_response(response):
     if not response:
         return "I couldn't generate a response. Please try again."
     
-    # Remove unnecessary AI disclaimers
-    response = re.sub(r"(as an ai(?: language)? model|i(?:'m| am) an? ai)", "", response, flags=re.IGNORECASE)
+    # Remove unnecessary AI disclaimers (single pass)
+    response = re.sub(r"(?i)(as an ai(?: language)? model|i(?:'m| am) an? ai)", "", response)
     response = re.sub(r"\s+", " ", response).strip()
     
-    # Add safety notice if not present
+    # Add safety notice (shorter version)
     if "consult a healthcare professional" not in response.lower():
-        response += "\n\n⚠️ Note: Consult a healthcare professional for medical advice"
+        response += "\n\n⚠️ Consult a healthcare professional."
     
     return response
+
+# ===== PERIODIC MEMORY CLEANUP =====
+def cleanup_memory():
+    """Periodic memory cleanup"""
+    try:
+        gc.collect()
+        if gc.garbage:
+            gc.collect()
+    except:
+        pass
+
+def start_cleanup_scheduler():
+    """Start a background thread for periodic cleanup"""
+    def cleanup_loop():
+        while True:
+            time.sleep(60)  # Clean every minute
+            cleanup_memory()
+    
+    import threading
+    thread = threading.Thread(target=cleanup_loop, daemon=True)
+    thread.start()
+
+# Start the cleanup scheduler
+start_cleanup_scheduler()
 
 # ===== ROUTES =====
 
@@ -347,14 +436,18 @@ def chat():
         if not user_query:
             return jsonify({'error': 'Query is missing.'}), 400
 
-        # Limit chat history to save memory
-        if chat_history and len(chat_history) > 3:
-            chat_history = chat_history[-3:]
+        # TRUNCATE EARLY - Limit query length
+        if len(user_query) > 300:
+            user_query = user_query[:300] + "..."
+
+        # Limit chat history aggressively
+        if chat_history and len(chat_history) > 2:
+            chat_history = chat_history[-2:]
         
-        # Normalize history
+        # Normalize history with truncation
         if chat_history and isinstance(chat_history[0], dict):
             chat_history = [
-                f"{m.get('sender','unknown')}: {m.get('text','')}"
+                f"{m.get('sender','unknown')}: {m.get('text','')[:100]}"
                 for m in chat_history
             ]
 
@@ -370,35 +463,39 @@ def chat():
         vector_store = get_vector_store()
         
         # Reduce number of documents retrieved
-        docs = vector_store.similarity_search(user_query, k=2)  # Reduced from 3
-        context = "\n".join(d.page_content for d in docs) if docs else ""
+        docs = vector_store.similarity_search(user_query, k=1)  # Only 1 document
+        context = "\n".join(d.page_content[:200] for d in docs) if docs else ""
 
-        # Build prompt
-        history_text = "\n".join(chat_history[-2:]) if chat_history else ""  # Limit history
+        # Build prompt with limited length
+        history_text = "\n".join(chat_history[-1:]) if chat_history else ""
         formatted_prompt = system_prompt.format(
-            query=user_query,
-            history=history_text,
+            query=user_query[:200],
+            history=history_text[:200],
             category=category
         )
         
         if category == 'emergency':
-            formatted_prompt += "\n\n" + emergency_subprompt
+            formatted_prompt += "\n\n" + emergency_subprompt[:100]
 
         # Get LLM (lazy loaded)
         llm = get_llm()
         raw_response = llm._call(formatted_prompt)
         response = clean_response(raw_response)
 
-        # Get professionals (limit to 1 for memory)
-        pros = find_relevant_professionals(user_query, max_results=1)  # Reduced from 2
-        if pros:
-            response += "\n\nFor specialized care at Metro Hospital, you may contact:"
-            for p in pros:
-                response += f"\n- {p['name']} ({p['specialty']}), 📞 {p['phone']}"
+        # Get professionals (limit to 1, with error handling)
+        try:
+            pros = find_relevant_professionals(user_query[:100], max_results=1)
+            if pros:
+                response += "\n\nFor specialized care, contact:"
+                for p in pros:
+                    response += f"\n- {p['name']} ({p['specialty']})"
+        except Exception as e:
+            print(f"⚠️ Professional lookup error: {e}")
+            # Continue without professionals
 
         # Add video link if available
         if video_link:
-            response += f"\n\n**First‑Aid Video:** {video_link}"
+            response += f"\n\n**First-Aid:** {video_link}"
 
         # Force garbage collection
         gc.collect()
@@ -413,7 +510,7 @@ def chat():
         print("❌ Error in /chat endpoint:", e)
         gc.collect()
         return jsonify({
-            'response': "⚠️ I'm experiencing high load. Please try again in a moment.",
+            'response': "⚠️ Please try again in a moment.",
             'error': str(e)
         }), 500
 
@@ -426,9 +523,9 @@ def handle_image_analysis():
         if not base64_image:
             return jsonify({'error': 'Image is missing'}), 400
         
-        # Limit image size
-        if len(base64_image) > 5 * 1024 * 1024:  # Reduced to 5MB
-            return jsonify({'error': 'Image size too large. Maximum 5MB allowed.'}), 400
+        # Limit image size to 3MB
+        if len(base64_image) > 3 * 1024 * 1024:
+            return jsonify({'error': 'Image size too large. Maximum 3MB allowed.'}), 400
         
         # Get image analyzer (lazy loaded)
         image_analyzer = get_image_analyzer()
@@ -437,7 +534,7 @@ def handle_image_analysis():
         if not analysis:
             analysis = "Unable to analyze the image. Please try again."
         
-        response_text = f"📸 **Image Analysis Results:**\n\n{analysis}\n\n---\n⚠️ **Important Note:** This analysis is for informational purposes only. Always consult with a qualified healthcare professional for medical advice, diagnosis, or treatment."
+        response_text = f"📸 **Image Analysis:**\n\n{analysis[:500]}\n\n---\n⚠️ Consult a healthcare professional."
         
         gc.collect()
         
@@ -450,7 +547,7 @@ def handle_image_analysis():
         print("❌ Error in /analyze-image endpoint:", e)
         gc.collect()
         return jsonify({
-            'error': f"Image analysis failed. Please try again.",
+            'error': f"Image analysis failed.",
             'type': 'error'
         }), 500
 
@@ -483,7 +580,7 @@ def calculate_bmi():
         return jsonify({
             'bmi': round(bmi, 1),
             'category': category,
-            'interpretation': interpretation,
+            'interpretation': interpretation[:300],  # Limit length
             'type': 'bmi_result'
         })
     except Exception as e:
@@ -508,20 +605,20 @@ def mood_tracking():
         mental_health_llm = get_mental_health_llm()
         
         prompt = mood_tracking_prompt.format(
-            description=description[:200],  # Limit description length
+            description=description[:150],  # Limit description length
             mood_score=mood_score,
-            tags=", ".join(tags[:5])  # Limit tags
+            tags=", ".join(tags[:3])  # Limit tags
         )
 
         result = mental_health_llm._call(prompt)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
         
         if "consult a healthcare professional" not in cleaned_response.lower():
-            cleaned_response += "\n\nNote: This is for mental wellness support. For crisis situations, please contact a mental health professional or emergency services."
+            cleaned_response += "\n\nNote: For crisis, contact a professional."
 
         gc.collect()
         
-        return jsonify({'response': cleaned_response, 'type': 'mood_tracking'})
+        return jsonify({'response': cleaned_response[:500], 'type': 'mood_tracking'})
     except Exception as e:
         print("❌ Error in mood tracking:", e)
         gc.collect()
@@ -542,20 +639,20 @@ def cbt_exercises():
         mental_health_llm = get_mental_health_llm()
         
         prompt = cbt_exercises_prompt.format(
-            concern=concern[:200],  # Limit concern length
-            tried_strategies=tried_strategies[:200],
-            desired_outcome=desired_outcome[:200]
+            concern=concern[:150],
+            tried_strategies=tried_strategies[:150],
+            desired_outcome=desired_outcome[:150]
         )
 
         result = mental_health_llm._call(prompt)
         cleaned_response = re.sub(r'◁think▷.*?◁/think▷', '', result, flags=re.DOTALL).strip()
         
         if "consult a healthcare professional" not in cleaned_response.lower():
-            cleaned_response += "\n\nNote: These exercises are for self-help purposes. If you're experiencing severe distress, please seek professional support."
+            cleaned_response += "\n\nNote: Seek professional support if needed."
 
         gc.collect()
         
-        return jsonify({'response': cleaned_response, 'type': 'cbt_exercises'})
+        return jsonify({'response': cleaned_response[:500], 'type': 'cbt_exercises'})
     except Exception as e:
         print("❌ Error in CBT exercises:", e)
         gc.collect()
@@ -602,5 +699,14 @@ def root():
     return 'OK', 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))  # Added default
-    app.run(debug=False, host='0.0.0.0', port=port)
+    # Force garbage collection before starting
+    gc.collect()
+    
+    port = int(os.environ.get('PORT', 5000))
+    app.run(
+        debug=False, 
+        host='0.0.0.0', 
+        port=port,
+        threaded=False,  # Disable threading to reduce memory
+        processes=1      # Single process
+    )
