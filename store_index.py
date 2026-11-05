@@ -1,89 +1,86 @@
-import os
+"""Indexing script: load PDFs, embed via the EmbeddingService, upsert to Pinecone.
+
+Safe-index rules:
+- Uses the index for the CONFIGURED embedding provider (EMBEDDING_PROVIDER env var).
+- Creates the index only if missing; verifies dimension compatibility before upsert.
+- NEVER deletes or recreates an existing index.
+- Batch embedding + batch upsert.
+
+Run once per knowledge-base change:
+    EMBEDDING_PROVIDER=openrouter python store_index.py
+"""
+import logging
 import time
-from dotenv import load_dotenv
-from src.helper import load_pdf_file, text_split, download_hugging_face_embeddings
-from langchain_pinecone import Pinecone as LangchainPinecone
-from tenacity import retry, stop_after_attempt, wait_exponential
-from pinecone import Pinecone, ServerlessSpec
 from pathlib import Path
 
-# Monkey-patch pinecone.Index to use the new client’s index type
-from pinecone import data
-import pinecone
-pinecone.Index = data.index.Index
+from dotenv import load_dotenv
+
+from src.config import (
+    EMBEDDING_PROVIDER,
+    PINECONE_INDEX_LOCAL,
+    PINECONE_INDEX_OPENROUTER,
+)
+from src.embedding_service import get_embedding_service
+from src.helper import load_pdf_file, text_split
+from src.vector_service import VectorService, VectorServiceError, get_vector_service
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("store_index")
+
 
 def main():
-    # Load environment variables
     load_dotenv()
-    PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-    
-    try:
-        # Initialize Pinecone client (new v3.0+ style)
-        pc = Pinecone(api_key=PINECONE_API_KEY)
-    except Exception as e:
-        print(f"Failed to initialize Pinecone: {e}")
-        raise
 
-    # Dynamically calculate the relative path to the 'Data/' folder
+    service = get_embedding_service()
+    vector_service: VectorService = get_vector_service()
+
+    index_name = (
+        PINECONE_INDEX_OPENROUTER if EMBEDDING_PROVIDER == "openrouter" else PINECONE_INDEX_LOCAL
+    )
+
     data_folder = Path(__file__).parent / "Data"
+    if not data_folder.exists():
+        logger.error("Data folder not found at %s - nothing to index.", data_folder)
+        return
 
-    # Load and process data
-    print("\n1. Loading PDF documents...")
+    print(f"\n1. Loading PDF documents from {data_folder} ...")
     extracted_data = load_pdf_file(data=str(data_folder))
-    
+    print(f"   Loaded {len(extracted_data)} document pages.")
+
     print("\n2. Splitting text into chunks...")
     text_chunks = text_split(extracted_data)
-    
-    print("\n3. Downloading embeddings...")
-    embeddings = download_hugging_face_embeddings()
+    print(f"   Produced {len(text_chunks)} chunks.")
+    if not text_chunks:
+        print("   No chunks to index - exiting.")
+        return
 
-    index_name = "doctorbot"
+    print(f"\n3. Embedding provider: '{service.provider_tag}' "
+          f"(model={service.model_name}, dim={service.dimension})")
 
-    # Index management
-    print("\n4. Checking Pinecone index...")
+    print(f"\n4. Ensuring Pinecone index '{index_name}'...")
     try:
-        if index_name not in [index_info["name"] for index_info in pc.list_indexes()]:
-            print(f"Creating index {index_name}...")
-            pc.create_index(
-                name=index_name,
-                dimension=384,  # Update this to match your embedding dimensions
-                metric="cosine",
-                spec=ServerlessSpec(
-                    cloud="aws",
-                    region="us-east-1"
-                )
-            )
-            print("Waiting 60 seconds for index initialization...")
-            time.sleep(60)
-    except Exception as e:
-        print(f"Index management failed: {e}")
-        raise
+        vector_service.ensure_index(index_name)
+    except VectorServiceError as exc:
+        print(f"\n❌ {exc}")
+        print("\nMIGRATION GUIDE: never delete or overwrite an existing index. If the existing "
+              "index was built with a different embedding model, create a NEW index with the "
+              "correct dimension for this model and re-run this script pointing at it "
+              "(see PINECONE_INDEX_OPENROUTER / PINECONE_INDEX_LOCAL in .env.example).")
+        raise SystemExit(1)
 
-    # Document upsert with retry logic
-    @retry(stop=stop_after_attempt(3), 
-           wait=wait_exponential(multiplier=1, min=4, max=10))
-    def upsert_documents():
-        print("\n5. Upserting documents to Pinecone...")
-        return LangchainPinecone.from_documents(
-            documents=text_chunks,
-            index_name=index_name,
-            embedding=embeddings
-        )
-
+    print("\n5. Upserting documents to Pinecone (batched)...")
+    start = time.time()
     try:
-        # Perform upsert and verify
-        docsearch = upsert_documents()
-        print("\n6. Indexing completed successfully!")
-        
-        # Verify index stats
-        index = pc.Index(index_name)
-        stats = index.describe_index_stats()
-        print(f"Total vectors in index: {stats['total_vector_count']}")
-        print(f"Total documents processed: {len(text_chunks)}")
-        
-    except Exception as e:
-        print(f"\nError during document upsert: {e}")
-        raise
+        count = vector_service.upsert_documents(text_chunks)
+    except VectorServiceError as exc:
+        print(f"\n❌ {exc}")
+        raise SystemExit(1)
+
+    print(f"\n6. Indexing completed successfully: {count} chunks in {time.time() - start:.1f}s.")
+
+    stats = vector_service.index_stats(index_name)
+    print(f"   Total vectors in index '{index_name}': {stats.get('total_vector_count')}")
+
 
 if __name__ == "__main__":
     main()
