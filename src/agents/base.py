@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import Field
 
-from src.llm_manager import get_chat_model
+from src.llm_manager import get_chat_model, LLMError
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,36 @@ class BaseAgent:
     def invoke(self, prompt: str) -> str:
         """Invoke the role's failover LLM with a plain prompt."""
         from langchain_core.messages import HumanMessage
+        from src.llm_manager import LLMError
 
-        result = self.llm._generate([HumanMessage(content=prompt)])
-        return result.generations[0].message.content
+        try:
+            result = self.llm.invoke([HumanMessage(content=prompt)])
+        except Exception as exc:
+            logger.error("LLM invoke failed for role=%s: %s", self.role, exc)
+            raise LLMError(f"LLM invoke failed for role '{self.role}': {exc}") from exc
+
+        # ---------- DIAGNOSTIC (temporary) ----------
+        try:
+            logger.warning("=== LLM RAW RESULT role=%s ===", self.role)
+            logger.warning("type=%s", type(result).__name__)
+            logger.warning("repr=%.800r", result)
+            logger.warning("content=%r", getattr(result, "content", "<no content attr>"))
+            logger.warning("additional_kwargs=%r", getattr(result, "additional_kwargs", None))
+            logger.warning("response_metadata=%r", getattr(result, "response_metadata", None))
+            logger.warning("usage_metadata=%r", getattr(result, "usage_metadata", None))
+            logger.warning("=== END LLM RAW RESULT ===")
+        except Exception as _diag_exc:
+            logger.warning("Diagnostic logging failed: %s", _diag_exc)
+        # -------------------------------------------
+
+        content = getattr(result, "content", None)
+        if content is None:
+            content = str(result) if result is not None else ""
+        if isinstance(content, list):
+            # Some providers return content as a list of blocks
+            content = "".join(
+                (b.get("text", "") if isinstance(b, dict) else str(b)) for b in content
+            )
+        if not content or not content.strip():
+            raise LLMError(f"LLM returned an empty completion for role '{self.role}'")
+        return content

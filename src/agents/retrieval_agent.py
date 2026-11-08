@@ -22,10 +22,12 @@ class RetrievalAgent(BaseAgent):
     def retrieve(self, query: str, k: int = 2) -> List:
         """Return the top-k documents for a query (empty list on any failure)."""
         try:
-            store = get_vector_service().get_store()
+            service = get_vector_service()
+            store = service.get_store()
             docs = store.similarity_search(query, k=k)
-            logger.info("Retrieved %d documents for query (provider=%s).",
-                        len(docs), get_vector_service().service.provider_tag)
+            logger.info("Retrieved %d documents for query (provider=%s, index=%s).",
+                        len(docs), service.service.provider_tag,
+                        service.index_name_for_provider())
             return docs
         except VectorServiceError as exc:
             # Configuration problem (e.g. dimension mismatch) - surfaced, not swallowed.

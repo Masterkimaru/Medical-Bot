@@ -1,8 +1,6 @@
 """Coordinator agent: LangGraph orchestration of the specialist agents.
-
 Flow:
-  route -> retrieve -> [specialist agent] -> validate -> END
-
+route -> retrieve -> [specialist agent] -> validate -> END
 The router uses deterministic keyword classification (legacy behaviour); the
 specialist agent is selected from the routed topic; the validation agent
 always checks the draft before it is returned.
@@ -10,9 +8,7 @@ always checks the draft before it is returned.
 import logging
 import re
 from typing import Any, Dict, Optional
-
 from langgraph.graph import END, StateGraph
-
 from src.agents.base import AgentResult
 from src.agents.emergency_agent import EmergencyAgent
 from src.agents.general_health_agent import GeneralHealthAgent
@@ -27,7 +23,6 @@ from video_link import get_first_aid_video
 from src.helper_pros import find_relevant_professionals
 
 logger = logging.getLogger(__name__)
-
 
 class AgentCoordinator:
     """Routes queries to specialist agents and validates their responses."""
@@ -47,11 +42,13 @@ class AgentCoordinator:
         graph.add_node("retrieve", self._retrieve_node)
         graph.add_node("specialist", self._specialist_node)
         graph.add_node("validate", self._validate_node)
+
         graph.set_entry_point("route")
         graph.add_edge("route", "retrieve")
         graph.add_edge("retrieve", "specialist")
         graph.add_edge("specialist", "validate")
         graph.add_edge("validate", END)
+
         self.graph = graph.compile()
 
     # ------------------------------------------------------------------
@@ -72,8 +69,23 @@ class AgentCoordinator:
         except Exception as exc:  # config-level retrieval error -> degrade to no context
             logger.error("Retrieval failed, continuing without context: %s", exc)
             docs = []
+
+        # Keep the LLM context CLEAN. Do NOT inject doctor-recommendation
+        # instructions here: mixing a "promote these doctors" directive into a
+        # medical prompt is what was causing safety-tuned models to return an
+        # empty completion (which then surfaced as `empty_response`).
         state["docs"] = docs
         state["context"] = "\n".join(d.page_content for d in docs)
+
+        # Look up doctors separately; they are appended AFTER the LLM draft.
+        try:
+            state["recommended_doctors"] = find_relevant_professionals(
+                state["query"], max_results=self.max_professionals
+            ) or []
+        except Exception as exc:
+            logger.warning("Professional lookup failed: %s", exc)
+            state["recommended_doctors"] = []
+
         return state
 
     def _specialist_node(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,6 +98,7 @@ class AgentCoordinator:
                 response = self.medication_agent.run(query, context, history)
             else:
                 response = self.general_health_agent.run(query, context, history)
+
             state["draft"] = response
             state["agent_used"] = (
                 "emergency" if topic == "emergency"
@@ -156,17 +169,16 @@ class AgentCoordinator:
                           response, flags=re.IGNORECASE)
         return re.sub(r"[ \t]+", " ", response).strip()
 
-    def _append_professionals(self, response: str, query: str) -> str:
-        try:
-            pros = find_relevant_professionals(query, max_results=self.max_professionals)
-        except Exception as exc:
-            logger.warning("Professional lookup failed: %s", exc)
-            pros = []
-        if pros:
-            response += "\n\nFor specialized care at Metro Hospital, you may contact:"
-            for p in pros:
-                response += f"\n- {p['name']} ({p['specialty']}), 📞 {p.get('phone', 'N/A')}"
-        return response
+    @staticmethod
+    def _format_professionals(pros: list) -> str:
+        """Deterministically render the recommended-doctors block."""
+        lines = ["**Recommended Metro Hospital Professionals:**"]
+        for p in pros:
+            name = p.get("name", "Unknown")
+            specialty = p.get("specialty", "General")
+            phone = p.get("phone", "N/A")
+            lines.append(f"- {name} ({specialty}), 📞 {phone}")
+        return "\n".join(lines)
 
     def handle(self, query: str, history=None) -> dict:
         """Process a chat query end-to-end. Returns the legacy API payload dict."""
@@ -181,13 +193,19 @@ class AgentCoordinator:
             "history": history_text,
             "query_terms": preprocess_text(query),
         }
-        final = self.graph.invoke(state)
 
+        final = self.graph.invoke(state)
         response = self._clean_response(final.get("response", ""))
         category = final.get("category", "non-emergency")
         video_link = final.get("video_link")
 
-        response = self._append_professionals(response, query)
+        # Append doctor recommendations AFTER the LLM draft. This keeps the
+        # prompt clean (avoids empty refusals) and the recommendation block is
+        # deterministic, so validation cannot reject it as unsupported.
+        pros = final.get("recommended_doctors") or []
+        if pros and response:
+            response += "\n\n" + self._format_professionals(pros)
+
         if video_link:
             response += f"\n\n**First‑Aid Video:** {video_link}"
 

@@ -7,6 +7,18 @@ Design:
 - Only provider-layer failures trigger fallback to the next provider in the
   chain; every event is logged so failures are auditable.
 - Delegates (OpenRouterChatLLM / ChatGroq) are cached and reused per process.
+
+Empty-completion handling (added):
+- Some OpenRouter routes return HTTP 200 with an empty "content" and a
+  "finish_reason" of "content_filter" or similar. The previous code turned
+  that into a silent AIMessage(content='') which downstream looked like a
+  successful but empty response. We now detect that case explicitly and raise
+  LLMUnavailableError so the failover wrapper moves to the next provider,
+  and so the caller gets a clear error instead of an empty draft.
+- Top-level "error" fields that some OpenRouter proxies return with HTTP 200
+  are also detected and surfaced.
+- response_metadata / usage_metadata are populated so diagnostic logging in
+  BaseAgent.invoke() can see finish_reason / usage directly.
 """
 import logging
 import threading
@@ -53,7 +65,8 @@ class LLMInvalidRequestError(LLMError):
 
 
 class LLMUnavailableError(LLMError):
-    """Temporary provider problem: timeout, connection error, 429 or 5xx."""
+    """Temporary provider problem: timeout, connection error, 429, 5xx,
+    or a successful response with an empty completion (content filter, etc.)."""
 
 
 class LLMAllProvidersFailedError(LLMError):
@@ -91,6 +104,27 @@ def classify_llm_error(exc: Exception) -> str:
 _ROLE_MAP = {"human": "user", "ai": "assistant", "system": "system", "tool": "user", "function": "user"}
 
 
+def _extract_text_content(content: Any) -> str:
+    """Normalise OpenRouter 'message.content' which may be a string or a list of blocks."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                # Common OpenRouter/OpenAI content-block shapes:
+                if "text" in block and isinstance(block["text"], str):
+                    parts.append(block["text"])
+                elif block.get("type") == "text" and isinstance(block.get("content"), str):
+                    parts.append(block["content"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content)
+
+
 class OpenRouterChatLLM(BaseChatModel):
     """Chat model that talks to the OpenRouter chat-completions API."""
 
@@ -106,6 +140,13 @@ class OpenRouterChatLLM(BaseChatModel):
     def _generate(self, messages: List[BaseMessage], stop=None, run_manager=None, **kwargs) -> ChatResult:
         if not OPENROUTER_API_KEY:
             raise LLMAuthenticationError("OPENROUTER_API_KEY is not configured.")
+
+        if self.max_tokens is None or int(self.max_tokens) <= 0:
+            # A zero/negative max_tokens is a common misconfig that produces
+            # empty completions from every provider. Fail loudly instead.
+            raise LLMInvalidRequestError(
+                f"LLM_MAX_TOKENS is misconfigured (value={self.max_tokens!r}); it must be > 0."
+            )
 
         payload_messages = [{"role": _ROLE_MAP.get(m.type, "user"), "content": m.content} for m in messages]
         headers = {
@@ -150,8 +191,94 @@ class OpenRouterChatLLM(BaseChatModel):
                     )
                 response.raise_for_status()
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content or ""))])
+
+                # Some OpenRouter proxies return HTTP 200 with a top-level "error"
+                # when an upstream provider dies mid-stream. Detect and surface it.
+                if isinstance(data, dict) and data.get("error"):
+                    err = data["error"]
+                    msg = err.get("message") if isinstance(err, dict) else str(err)
+                    logger.error(
+                        "[openrouter] top-level error for %s: %r (raw=%r)",
+                        self.model_name, err, data,
+                    )
+                    # Treat as retryable so the failover wrapper can try the next provider.
+                    last_error = LLMUnavailableError(f"OpenRouter upstream error: {msg}")
+                    if attempt < attempts:
+                        time.sleep(min(2 ** attempt, 8))
+                        continue
+                    raise last_error
+
+                choices = (data or {}).get("choices") or []
+                if not choices:
+                    logger.error(
+                        "[openrouter] no choices returned for %s: %r",
+                        self.model_name, data,
+                    )
+                    raise LLMInvalidRequestError(
+                        f"OpenRouter returned no choices for {self.model_name}: {str(data)[:300]}"
+                    )
+
+                choice = choices[0] or {}
+                finish_reason = choice.get("finish_reason")
+                message = choice.get("message") or {}
+
+                # Some models/providers put a structured refusal into a separate key.
+                refusal = message.get("refusal")
+                if refusal:
+                    logger.error(
+                        "[openrouter] refusal from %s (finish_reason=%r): %r",
+                        self.model_name, finish_reason, refusal,
+                    )
+                    raise LLMInvalidRequestError(
+                        f"OpenRouter refused the request for {self.model_name} "
+                        f"(finish_reason={finish_reason}, refusal={refusal!r})"
+                    )
+
+                content = _extract_text_content(message.get("content"))
+
+                if not content or not content.strip():
+                    # IMPORTANT: do not silently return AIMessage('') here.
+                    # finish_reason="content_filter" is the most common cause;
+                    # also seen with "length" when max_tokens is too small.
+                    usage = (data or {}).get("usage") or {}
+                    logger.error(
+                        "[openrouter] empty content from %s: finish_reason=%r usage=%r message=%r",
+                        self.model_name, finish_reason, usage, message,
+                    )
+                    last_error = LLMUnavailableError(
+                        f"OpenRouter returned an empty completion for {self.model_name} "
+                        f"(finish_reason={finish_reason}). Typical causes: content_filter, "
+                        f"max_tokens too small, or the upstream model is unavailable."
+                    )
+                    # Retry on transient causes; raise immediately on content_filter.
+                    if finish_reason == "content_filter":
+                        raise last_error
+                    if attempt < attempts and finish_reason in (None, "length"):
+                        time.sleep(min(2 ** attempt, 8))
+                        continue
+                    raise last_error
+
+                usage = (data or {}).get("usage") or {}
+                ai_msg = AIMessage(
+                    content=content,
+                    response_metadata={
+                        "provider": "openrouter",
+                        "model": self.model_name,
+                        "finish_reason": finish_reason,
+                        "id": (data or {}).get("id"),
+                        "usage": usage,
+                    },
+                    usage_metadata=(
+                        {
+                            "input_tokens": usage.get("prompt_tokens", 0) or 0,
+                            "output_tokens": usage.get("completion_tokens", 0) or 0,
+                            "total_tokens": usage.get("total_tokens", 0) or 0,
+                        }
+                        if usage else None
+                    ),
+                )
+                return ChatResult(generations=[ChatGeneration(message=ai_msg)])
+
             except LLMError:
                 raise
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
@@ -309,7 +436,7 @@ def analyze_image(base64_image: str, prompt: str) -> str:
             ],
         }],
         "temperature": 0.3,
-        "max_tokens": 500,
+        "max_tokens": 700,
     }
 
     try:
@@ -325,12 +452,32 @@ def analyze_image(base64_image: str, prompt: str) -> str:
             raise LLMInvalidRequestError(f"Vision request rejected (HTTP {response.status_code}).")
         response.raise_for_status()
         result = response.json()
+
+        if isinstance(result, dict) and result.get("error"):
+            err = result["error"]
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            raise LLMUnavailableError(f"Vision upstream error: {msg}")
+
         choices = result.get("choices") or []
         if not choices:
-            return "Unable to analyze image. No response generated."
-        message = choices[0].get("message", {})
-        content = message.get("content")
-        return content or "Image analysis completed but returned empty result."
+            raise LLMInvalidRequestError(
+                f"Vision request returned no choices: {str(result)[:300]}"
+            )
+        choice = choices[0] or {}
+        finish_reason = choice.get("finish_reason")
+        message = choice.get("message") or {}
+        content = _extract_text_content(message.get("content"))
+        if not content or not content.strip():
+            logger.error(
+                "[openrouter-vision] empty content for %s: finish_reason=%r message=%r",
+                VISION_LLM_MODEL, finish_reason, message,
+            )
+            raise LLMUnavailableError(
+                f"Vision model returned an empty completion for {VISION_LLM_MODEL} "
+                f"(finish_reason={finish_reason})."
+            )
+        return content
+
     except LLMError:
         raise
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:

@@ -12,9 +12,13 @@ Endpoints and response shapes are unchanged from the legacy app:
 
 Heavy resources (embedding service, Pinecone, LLM failover layer, agents) are
 initialized lazily and reused across requests, and the app is Gunicorn-ready.
+
+A startup warmup loads the embedding model and builds the coordinator so the
+first /chat request does not pay the cold-start cost.
 """
 import logging
 import re
+import time
 from threading import Lock
 
 from flask import Flask, jsonify, request
@@ -43,6 +47,7 @@ CORS(app, origins=[
 _coordinator = None
 _coordinator_lock = Lock()
 _init_error = None
+_warmup_done = False
 
 
 def _build_coordinator():
@@ -66,6 +71,46 @@ def _build_coordinator():
 
 def get_coordinator():
     return _build_coordinator()
+
+
+def _warm_services() -> None:
+    """Pre-load heavy resources so the first /chat request is fast.
+
+    Runs once per process. Failures are logged but never fatal — the app will
+    simply cold-start on the first real request instead.
+    """
+    global _warmup_done
+    if _warmup_done:
+        return
+    start = time.time()
+
+    # 1. Load the embedding model and force a single inference.
+    try:
+        from src.embedding_service import get_embedding_service
+        svc = get_embedding_service()
+        logger.info("Warming embedding service (provider=%s, model=%s, dim=%d)...",
+                    svc.provider_tag, svc.model_name, svc.dimension)
+        t0 = time.time()
+        vec = svc.embed_query("warmup")
+        logger.info("Embedding warmup complete in %.1fs (%d dims).", time.time() - t0, len(vec))
+    except Exception as exc:
+        logger.warning("Embedding warmup failed (will cold-start on first request): %s", exc)
+
+    # 2. Build the coordinator (LangGraph, router, specialist agents).
+    try:
+        if _build_coordinator() is None:
+            logger.warning("Coordinator not built during warmup (see earlier logs).")
+    except Exception as exc:
+        logger.warning("Coordinator warmup failed: %s", exc)
+
+    _warmup_done = True
+    logger.info("Service warmup finished in %.1fs.", time.time() - start)
+
+
+# Run warmup once at import time so both `python app.py` and Gunicorn benefit.
+# Under Gunicorn this executes in each worker process after fork, which is what
+# we want: each worker pre-loads its own model instance.
+_warm_services()
 
 
 # ==========================================================================
@@ -272,6 +317,7 @@ def health_check():
         'llm': 'available' if OPENROUTER_API_KEY else 'disabled',
         'coordinator': 'ready' if _coordinator is not None else ('error' if _init_error else 'lazy'),
         'validation': 'llm' if VALIDATION_ENABLED else 'rules',
+        'warmup': 'done' if _warmup_done else 'pending',
     }
     return jsonify({'status': 'healthy', 'memory_mb': memory_mb, 'services': services})
 

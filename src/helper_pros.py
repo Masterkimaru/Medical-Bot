@@ -1,42 +1,40 @@
-"""On-site medical professional lookup (MongoDB) - NLTK-free.
-
-Replaces the PorterStemmer/stopwords pipeline with the lightweight,
-negation-preserving tokenizer in src/text_utils.py. The special_cases keys are
-the stemmed tokens produced by that tokenizer (compatible with the old
-Porter-stemmed keys such as 'allerg', 'palpitat', 'hypertens').
+"""On-site medical professional lookup (JSON-based) - NLTK-free.
+Reads directly from meds.json instead of MongoDB.
 """
-import logging
+import json
 import os
-from typing import List
-
-from pymongo import MongoClient
-
-from src.config import MONGO_URI, MONGODB_DB_NAME
+import logging
+from typing import List, Dict, Any
 from src.text_utils import light_stem, tokenize
 
 logger = logging.getLogger(__name__)
 
-_client: MongoClient = None
+# --------------------------------------------------------------------------
+# 1. Load meds.json once at startup and cache in memory
+# --------------------------------------------------------------------------
+_MEDS_DATA: List[Dict[str, Any]] = []
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Assuming meds.json is in the root directory (one level up from src/)
+_MEDS_FILE_PATH = os.path.join(_BASE_DIR, '..', 'meds.json')
+if not os.path.exists(_MEDS_FILE_PATH):
+    # Fallback to current working directory if not found relative to script
+    _MEDS_FILE_PATH = os.path.join(os.getcwd(), 'meds.json')
 
+def _load_meds() -> List[Dict[str, Any]]:
+    global _MEDS_DATA
+    if not _MEDS_DATA:
+        try:
+            with open(_MEDS_FILE_PATH, 'r', encoding='utf-8') as f:
+                _MEDS_DATA = json.load(f)
+            logger.info(f"Successfully loaded {len(_MEDS_DATA)} medical professionals from meds.json")
+        except Exception as e:
+            logger.error(f"Failed to load meds.json from {_MEDS_FILE_PATH}: {e}")
+            _MEDS_DATA = []
+    return _MEDS_DATA
 
-def _get_collection():
-    global _client
-    if _client is None:
-        if not MONGO_URI:
-            raise RuntimeError("MONGODB_URI is not configured.")
-        _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    return _client[MONGODB_DB_NAME]["medical_professionals"]
-
-
-def _ensure_text_index(collection) -> None:
-    collection.create_index(
-        [("name", "text"), ("specialty", "text"), ("keywords", "text")],
-        default_language="english",
-        name="text_search_idx",
-    )
-
-
-# Special cases mapping (stemmed tokens -> specialties)
+# --------------------------------------------------------------------------
+# 2. Special cases mapping (FIXED: All trailing spaces removed)
+# --------------------------------------------------------------------------
 special_cases = {
     # Dermatology/Allergy
     "rash": ["Dermatology", "Allergy"],
@@ -124,90 +122,75 @@ special_cases = {
     "check": ["Family Medicine"],
 }
 
-
 def _match_special_case_token(token: str) -> bool:
     """True if the token equals a special-case key or is its stem."""
     return token in special_cases or light_stem(token) in special_cases
 
-
 def preprocess_text(text: str) -> List[str]:
-    """Tokenize and lightly stem while preserving negations (replaces NLTK)."""
+    """Tokenize and lightly stem while preserving negations."""
     return tokenize(text)
 
-
+# --------------------------------------------------------------------------
+# 3. Core Lookup Logic (Replaces MongoDB queries)
+# --------------------------------------------------------------------------
 def find_relevant_professionals(query: str, max_results: int = 3) -> list:
-    collection = _get_collection()
-    _ensure_text_index(collection)
-
+    docs = _load_meds()
+    if not docs:
+        return []
+        
     processed = preprocess_text(query)
-    text_search = " ".join(processed)
-
-    # 1) Full-text search
-    text_results = []
-    try:
-        text_cursor = collection.find(
-            {"$text": {"$search": text_search, "$language": "en",
-                        "$caseSensitive": False, "$diacriticSensitive": False}},
-            {"score": {"$meta": "textScore"}},
-        ).sort([("score", {"$meta": "textScore"})])
-        text_results = list(text_cursor)
-    except Exception as exc:
-        logger.warning("MongoDB text search failed: %s", exc)
-
-    # 2) Special-cases specialty lookup (raw token OR its light stem)
-    specs = set()
-    for token in processed:
-        if _match_special_case_token(token):
-            specs.update(special_cases[light_stem(token)])
-
-    spec_results = []
-    if specs:
-        try:
-            spec_results = list(collection.find({"specialty": {"$in": list(specs)}}))
-        except Exception as exc:
-            logger.warning("MongoDB specialty lookup failed: %s", exc)
-
-    # 3) Merge & dedupe
-    combined = text_results + spec_results
-    seen = set()
-    final = []
-    for doc in combined:
-        if doc["_id"] not in seen:
-            final.append(doc)
-            seen.add(doc["_id"])
-        if len(final) >= max_results:
-            break
-
-    # Fallback: match on specialty names
-    if not final:
-        try:
-            all_specs = collection.distinct("specialty")
-            query_specs = [spec for spec in all_specs
-                           if any(stem in spec.lower() for stem in (light_stem(t) for t in processed))]
-            if query_specs:
-                fallback = collection.find({"specialty": {"$in": query_specs}})
-                for doc in fallback:
-                    if doc["_id"] not in seen:
+    processed_stems = [light_stem(t) for t in processed]
+    
+    # 1) Keyword & Specialty matching with a scoring system
+    scored_results = []
+    for doc in docs:
+        score = 0
+        doc_keywords = [k.lower() for k in doc.get("keywords", [])]
+        doc_specialty = doc.get("specialty", "").lower()
+        
+        for stem in processed_stems:
+            # Boost score if the stem matches the specialty directly
+            if stem in doc_specialty:
+                score += 2
+            # Check against the doctor's specific keywords
+            for kw in doc_keywords:
+                if stem in kw or kw in stem:
+                    score += 1
+                    break  # Count once per keyword match per stem
+        
+        if score > 0:
+            scored_results.append((score, doc))
+            
+    # Sort by score descending and take top results
+    scored_results.sort(key=lambda x: x[0], reverse=True)
+    final = [doc for _, doc in scored_results[:max_results]]
+    
+    # 2) Special-cases specialty lookup (if we haven't found enough doctors yet)
+    if len(final) < max_results:
+        specs = set()
+        for token in processed:
+            stem = light_stem(token)
+            if stem in special_cases:
+                specs.update(special_cases[stem])
+            elif token in special_cases:
+                specs.update(special_cases[token])
+                
+        if specs:
+            for doc in docs:
+                if doc.get("specialty") in specs:
+                    # Avoid duplicates
+                    if not any(d.get("name") == doc.get("name") for d in final):
                         final.append(doc)
-                        seen.add(doc["_id"])
+                        if len(final) >= max_results:
+                            break
+                            
+    # 3) Fallback: Family/General practice if nothing matched
+    if not final:
+        for doc in docs:
+            if doc.get("specialty") in ["Family Medicine", "General Practice"]:
+                if not any(d.get("name") == doc.get("name") for d in final):
+                    final.append(doc)
                     if len(final) >= max_results:
                         break
-        except Exception as exc:
-            logger.warning("MongoDB specialty fallback failed: %s", exc)
-
-    # Final fallback: family/general practice
-    if not final:
-        try:
-            fallback = collection.find(
-                {"specialty": {"$in": ["Family Medicine", "General Practice"]}}
-            ).limit(max_results)
-            for doc in fallback:
-                if doc["_id"] not in seen:
-                    final.append(doc)
-                    seen.add(doc["_id"])
-                if len(final) >= max_results:
-                    break
-        except Exception as exc:
-            logger.warning("MongoDB general-practice fallback failed: %s", exc)
-
+                        
     return final
