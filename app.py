@@ -13,11 +13,14 @@ Endpoints and response shapes are unchanged from the legacy app:
 Heavy resources (embedding service, Pinecone, LLM failover layer, agents) are
 initialized lazily and reused across requests, and the app is Gunicorn-ready.
 
-A startup warmup loads the embedding model and builds the coordinator so the
-first /chat request does not pay the cold-start cost.
+Startup warmup loads the embedding model and builds the coordinator in a
+BACKGROUND THREAD so the HTTP port opens immediately. This is critical on
+Fly.io: the platform proxy gives up after ~8s if nothing is listening on the
+internal port, and loading sentence-transformers takes longer than that.
 """
 import logging
 import re
+import threading
 import time
 from threading import Lock
 
@@ -48,6 +51,8 @@ _coordinator = None
 _coordinator_lock = Lock()
 _init_error = None
 _warmup_done = False
+_warmup_started = False
+_warmup_lock = Lock()
 
 
 def _build_coordinator():
@@ -63,7 +68,7 @@ def _build_coordinator():
                     logger.info("Agent coordinator initialized.")
                 except Exception as exc:
                     # Do not crash the whole app at import time: /health must stay
-                    # available so Render can report a meaningful state.
+                    # available so Fly.io can report a meaningful state.
                     _init_error = str(exc)
                     logger.exception("Coordinator initialization failed: %s", exc)
     return _coordinator
@@ -107,10 +112,29 @@ def _warm_services() -> None:
     logger.info("Service warmup finished in %.1fs.", time.time() - start)
 
 
-# Run warmup once at import time so both `python app.py` and Gunicorn benefit.
-# Under Gunicorn this executes in each worker process after fork, which is what
-# we want: each worker pre-loads its own model instance.
-_warm_services()
+def _start_warmup_in_background() -> None:
+    """Kick off warmup on a daemon thread so Flask can bind to the port first.
+
+    Fly.io (and most PaaS platforms) require the process to accept connections
+    on the internal port within a few seconds. Loading sentence-transformers
+    blocks import for several seconds, which causes the proxy to give up with
+    "instance refused connection". Moving warmup off the import path fixes it.
+    """
+    global _warmup_started
+    with _warmup_lock:
+        if _warmup_started:
+            return
+        _warmup_started = True
+
+    t = threading.Thread(target=_warm_services, name="warmup", daemon=True)
+    t.start()
+    logger.info("Warmup started in background thread (port will open immediately).")
+
+
+# Start warmup off the import path so `flask run` / gunicorn can bind the port
+# right away. Under Gunicorn this executes once per worker after fork, which is
+# what we want: each worker pre-loads its own model instance in the background.
+_start_warmup_in_background()
 
 
 # ==========================================================================
@@ -317,7 +341,7 @@ def health_check():
         'llm': 'available' if OPENROUTER_API_KEY else 'disabled',
         'coordinator': 'ready' if _coordinator is not None else ('error' if _init_error else 'lazy'),
         'validation': 'llm' if VALIDATION_ENABLED else 'rules',
-        'warmup': 'done' if _warmup_done else 'pending',
+        'warmup': 'done' if _warmup_done else ('pending' if _warmup_started else 'not_started'),
     }
     return jsonify({'status': 'healthy', 'memory_mb': memory_mb, 'services': services})
 
