@@ -1,10 +1,11 @@
-# fly.toml app configuration file generated for medical-bot on 2026-11-10T05:56:51Z
+# fly.toml app configuration file generated for medical-bot on 2026-11-10T06:21:54Z
 #
 # See https://docs.fly.io/reference/configuration for information about how to use this file.
 #
 
 app = 'medical-bot'
 primary_region = 'ams'
+kill_timeout = '60s'
 
 [build]
 
